@@ -53,7 +53,7 @@ server/src/
 
 - `/trips`（登录后重定向最近行程或新建）、`/trips/:id/plan`、`/trips/:id/ai`、`/trips/:id/checklist`、`/trips/:id/budget`
 - `/trips/:id/map` → 重定向到 `plan`（保留兼容，勿再做独立地图页）
-- `/share/:token` 只读（同构地图+目录，无编辑、无账单）
+- `/share/:token`：`kind` 默认=行程只读（同构地图+目录，无账单）；`kind=aa`=共同支出小票（`AaShareView`，可带 `?for=`）
 - API 前缀 `/api/v1`
 
 ---
@@ -116,7 +116,7 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 
 严格按 [UI-design.md](./UI-design.md)：
 
-- 颜色只来自 `web/src/index.css` 的 `:root` 变量。JSX/Tailwind 禁止新 hex。
+- 颜色只来自 `web/src/index.css` 的 `:root` 变量。JSX/Tailwind 禁止新 hex。**唯一例外**：`AaTicket` / `aaExport` 热敏小票用独立青绿色板（见 PROGRESS §0），勿把橙强调色加回去。
 - 间距只准 4/8/12/16/24；卡片圆角 20；触控高度 ≥ 44。
 - 行程内底栏仅四项：**行程 / AI / 清单 / 记账**（无独立地图 Tab）。
 - 行程 Tab：切日点阵 + MapView + 目录抽屉；地图挂了时目录与半屏仍可编辑。LLM 挂了：手动加地点仍可用。
@@ -134,7 +134,7 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 5. 本地：`npm run dev`（web 5173，server 3000，Vite 代理 `/api`）。不要把 Key 写进命令行历史能看到的文档。
 6. 提交前：类型能过、手动路径能用、`.env` 未入库。
 
-V1.0 已落地主线：Prisma → trip CRUD → 行程编排（增删改排 + leg）→ MapView 标注连线 → 目录抽屉 → 清单 → 记账 + AA → AI extract/plan → 只读分享。后续按 PROGRESS「下一步」按需做 P1。
+V1.0 已落地主线并推 GitHub：Prisma → trip CRUD → 行程编排 → MapView → 目录抽屉 → 清单 → **我的代付账本** + AA 小票分享 → AI extract/plan → 只读/弱协作分享。接续任务先读 **PROGRESS.md §0**；可选增强见该文件 §4。
 
 ---
 
