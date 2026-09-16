@@ -1,7 +1,7 @@
 # 行迹 TripTrace 技术设计文档
 
-> 版本：v1.0 ｜ 日期：2026-09-15 ｜ 对应 PRD：v1.1
-> 前提：个人自用 Web 应用，移动端浏览器优先，本地/轻量服务器部署。
+> 版本：v1.1 ｜ 日期：2026-09-16 ｜ 对应 PRD：v1.2  
+> v1.1：对齐「我的代付账本」、取消估价→账单同步、`ShareLink.kind`、AA 小票快照。冲突时以本文件 + [PROGRESS.md](./PROGRESS.md) 为准。
 
 ---
 
@@ -77,12 +77,12 @@ web/
 │   ├── api/            # API 客户端（fetch 封装 + 类型）
 │   ├── components/     # 通用组件（Button/Card/BottomSheet...）
 │   ├── features/       # 按业务模块划分（核心）
-│   │   ├── planner/    # 行程规划（时间轴 + 地图）
+│   │   ├── planner/    # 行程（MapView + 目录抽屉 + 半屏）
 │   │   ├── ai/         # AI 行程助手
 │   │   ├── checklist/  # 物品清单
-│   │   ├── budget/     # 记账与 AA
+│   │   ├── budget/     # 代付账本 + AaTicket / aaExport
 │   │   ├── info/       # 天气/预约提醒
-│   │   └── share/      # 分享
+│   │   └── share/      # （分享页逻辑也可在 pages/SharePage）
 │   ├── stores/         # Zustand store（按模块拆）
 │   ├── hooks/          # 通用 hooks
 │   ├── lib/            # 工具函数（日期/金额/地理计算）
@@ -93,11 +93,12 @@ web/
 
 ### 3.2 关键前端决策
 
-- **路由**：React Router，主路由 `/trips/:id/plan`、`/trips/:id/map`、`/trips/:id/budget`、`/trips/:id/checklist`、`/share/:token`（只读）。
-- **地图封装**：`features/planner/MapView.tsx` 封装高德 JS API，POI 标注、连线、点击弹卡都在这一层，业务组件只传数据。
-- **拖拽排序**：`dnd-kit`（时间轴 POI 拖拽）。
-- **离线容错**：行程详情用 IndexedDB（`idb`）缓存，弱网下可查看已加载行程。
-- **PWA**：加 manifest + Service Worker，手机桌面图标直达，接近 App 体验。
+- **路由**：`/trips/:id/plan|ai|checklist|budget`；`/trips/:id/map` → 重定向 `plan`；`/share/:token`（`kind=trip` 只读行程，或 `kind=aa` 小票；可选 `?for=`）。
+- **地图封装**：仅 `features/planner/MapView.tsx`；编号针、多色 leg、点芯片改 mode、飞点。
+- **记账 UI**：`ExpensePanel`；AA 票：`AaTicket` + `aaExport`（链接/HTML/PDF）。
+- **拖拽**：`dnd-kit`（已有则复用，不另引库）。
+- **离线**：行程详情可用 IndexedDB 弱网查看；写失败必须明示。
+- **PWA**：可选，非阻塞。
 
 ---
 
@@ -166,8 +167,9 @@ model Trip {
   title      String
   startDate  DateTime
   endDate    DateTime
-  members    String   // JSON: ["我","张三"]，用于 AA
+  members    String   // JSON：仅同行朋友 ["张三"]；「我」不入库，记账时固定 payer=「我」
   currency   String   @default("CNY")
+  editVersion Int     @default(0) // 弱协作乐观锁
   days       TripDay[]
   expenses   Expense[]
   checklist  ChecklistItem[]
@@ -195,13 +197,13 @@ model ItineraryItem {
   customName String?       // 非 POI 的自定义条目（如"午睡"）
   startTime String?        // "14:30"
   durationMin Int?         // 预计停留
-  ticketPrice Float?       // 门票，联动预算
-  needBook  Boolean  @default(false)  // 需预约
-  bookAheadDays Int?                  // 提前 N 天预约
+  ticketPrice Float?       // 门票估价：仅行程参考展示，禁止写入 Expense
+  needBook  Boolean  @default(false)
+  bookAheadDays Int?
   bookUrl   String?
   note      String?
   day       TripDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
-  legToNext TransportLeg?             // 到下一个 item 的交通段
+  legToNext TransportLeg?
 }
 
 model POI {
@@ -222,21 +224,22 @@ model TransportLeg {
   mode       String           // walk/transit/drive/bike/train/flight
   distanceM  Int?
   durationMin Int?
-  cost       Float?           // 联动路费预算
+  cost       Float?           // 路费估价：仅行程参考，禁止写入 Expense
   fromItem   ItineraryItem @relation(fields: [fromItemId], references: [id], onDelete: Cascade)
 }
 
 model Expense {
-  id        String   @id @default(cuid())
-  tripId    String
-  category  String           // hotel/flight/food/ticket/transport/other
-  amount    Float
-  payer     String           // 付款人
-  itemId    String?          // 可选关联行程条目
-  date      DateTime
-  note      String?
-  splits    ExpenseSplit[]
-  trip      Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  tripId     String
+  category   String           // hotel/flight/food/ticket/transport/other
+  amount     Float
+  payer      String           // 恒为「我」（服务端强制）
+  itemId     String?
+  date       DateTime
+  note       String?
+  receiptExt String?          // jpg|png|webp
+  splits     ExpenseSplit[]   // 个人=仅「我」；共同=「我」+朋友均分
+  trip       Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 
 model ExpenseSplit {
@@ -258,20 +261,25 @@ model ChecklistItem {
 }
 
 model ShareLink {
-  id        String   @id @default(cuid())
-  tripId    String
-  token     String   @unique  // 随机 32 位
-  canEdit   Boolean  @default(false) // V1.5 弱协作
-  expiresAt DateTime?
-  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  tripId       String
+  token        String    @unique
+  canEdit      Boolean   @default(false)
+  kind         String    @default("trip") // trip | aa
+  passwordHash String?                 // 弱协作
+  expiresAt    DateTime?
+  trip         Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 ```
 
 ### 5.3 设计说明
 
-- **POI 独立成表**：充当本地缓存，同一地点多次使用不重复请求高德；`amapId` 为空表示用户手动创建。
-- **seq 排序**：重排时批量更新 seq（前端一次性提交新顺序，后端事务更新），不做链表结构。
-- **未来切 Postgres**：仅需改 Prisma datasource 和 JSON 字段类型，业务代码零改动。
+- **POI 独立成表**：本地缓存；`amapId` 为空=手动创建。
+- **seq 排序**：一次提交有序 id 数组，后端事务更新。
+- **members**：只存朋友；解析时过滤名为「我」的输入。
+- **估价 ≠ 账单**：无 `syncDayBudget`；启动可 `purgeEstimateLinkedExpenses()`。
+- **ShareLink.kind**：`trip` 快照剥离 expenses/checklist/members；`aa` 仅共同支出 + 结算字段（`othersOweMe` 等），支持按朋友名过滤。
+- **未来切 Postgres**：改 datasource 即可。
 
 ---
 
@@ -294,35 +302,40 @@ model ShareLink {
 | PUT | `/api/v1/days/:dayId/items/reorder` | 拖拽重排（body: 有序 itemId 数组）★ |
 | PATCH | `/api/v1/items/:id/leg` | 修改到下一地点的交通方式 ★ |
 
-★ 标记的接口：**返回的不只是被改对象，而是重算后的整天日程**（耗时、时间顺延、预算影响），前端直接用响应刷新，保证各模块一致。
+★ 标记的接口：**返回重算后的整天日程**（耗时、时间顺延），前端整包替换。**不含**预算/账单同步。
 
 ### 6.2 AI 助手
 
 | Method | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/ai/extract-pois` | 输入：自由文本（小红书笔记等）；输出：候选 POI 列表（LLM 提取 + 高德校验坐标） |
-| POST | `/api/v1/ai/plan` | 输入：tripId + 已确认 POI 列表 + 偏好；输出：按天分组的行程草稿（**不落库**，用户确认后才写入） |
-| POST | `/api/v1/ai/adjust` | 自然语言微调当前行程（如"第三天去掉一个点"），输出 diff 供确认 |
+| POST | `/api/v1/ai/extract-pois` | 自由文本 → 候选 POI（LLM 或按行拆分 + 高德校验） |
+| POST | `/api/v1/ai/plan` | 按天草稿，**不落库**，确认后写入 |
+| POST | `/api/v1/ai/adjust` | 自然语言微调 → diff（**未实现**，规格保留） |
 
-### 6.3 预算与 AA
+### 6.3 代付账本与结算
 
 | Method | 路径 | 说明 |
 |---|---|---|
-| GET/POST | `/api/v1/trips/:id/expenses` | 账单列表 / 记账 |
-| PATCH/DELETE | `/api/v1/expenses/:id` | 改 / 删 |
-| GET | `/api/v1/trips/:id/settlement` | AA 结算方案（最简转账路径，实时计算不落库） |
-| GET | `/api/v1/trips/:id/budget-summary` | 分类预算 vs 已花汇总 |
+| GET/POST | `/api/v1/trips/:id/expenses` | 列表 / 记账（服务端强制 `payer=我`） |
+| PATCH/DELETE | `/api/v1/expenses/:id` | 改 / 删；可附图 |
+| GET | `/api/v1/trips/:id/settlement` | 「朋友应付我」净额结果（实时算、不落库） |
+
+> 已移除：分类「预算额度 vs 已花」汇总若仍存在仅为展示已花，**无**行程估价自动灌入。
 
 ### 6.4 清单 / 信息 / 分享
 
 | Method | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/trips/:id/checklist/from-template` | 按模板生成清单 |
+| POST | `/api/v1/trips/:id/checklist/from-template` | 按模板生成 |
 | PATCH | `/api/v1/checklist-items/:id` | 打勾/改名 |
-| GET | `/api/v1/trips/:id/weather` | 行程目的地天气（后端代理 + 1h 缓存） |
-| GET | `/api/v1/trips/:id/booking-reminders` | 预约待办（按 bookAheadDays 算出应预约日期） |
-| POST | `/api/v1/trips/:id/share` | 生成只读分享链接 |
-| GET | `/api/v1/share/:token` | 只读行程快照（**无鉴权，仅 token，不暴露账单等隐私字段**） |
+| GET | `/api/v1/trips/:id/weather` | 天气（缓存） |
+| GET | `/api/v1/trips/:id/booking-reminders` | 预约待办 |
+| GET | `/api/v1/days/:dayId/traffic` | 当天实时路况 |
+| POST | `/api/v1/trips/:id/share` | 生成/复用 `kind=trip` 只读链接 |
+| POST | `/api/v1/trips/:id/share/aa` | 生成/复用 `kind=aa` 共同支出链接 |
+| POST | `/api/v1/trips/:id/share/edit` | 弱协作：设密码 |
+| GET | `/api/v1/share/:token` | 公开快照：trip 或 aa（无登录鉴权） |
+| POST | `/api/v1/share/:token/unlock` | 弱协作解锁 → editor JWT |
 
 ### 6.5 外部代理（隐藏服务端 Key）
 
@@ -350,33 +363,35 @@ model ShareLink {
 
 ## 8. 模块联动实现方案
 
-PRD 第 6 节的联动规则，技术上用**「单事务重算 + 整包返回」**实现，不用事件总线（个人项目杀鸡不用牛刀）：
+PRD 第 6 节用**「单事务重算 + 整包返回」**实现，不用事件总线：
 
 ```
 planner.service.ts
-├── reorderItems(dayId, orderedIds)
-│     1. 事务内更新 seq
-│     2. 对受影响的相邻 item 调 providers/amap 重算 leg（带 POI 缓存）
-│     3. 重算当日时间轴（startTime + duration + leg.duration 顺延）
-│     4. 同步预算条目（门票/路费变动）
+├── reorderItems / updateLeg / addItem / removeItem
+│     1. 事务内改 seq / mode / CRUD
+│     2. providers/amap 重算相邻 leg（POI 缓存）
+│     3. 顺延当日时刻
+│     4. **不**写 Expense（估价仅留在 item/leg 字段）
 │     5. 返回重算后的整天数据
-├── updateLeg(itemId, mode)      // 同上，触发 2→3→4→5
-├── addItem / removeItem         // 同上，并增减预约提醒
-└── updateTripDates(tripId, ...) // 触发天气重拉 + 预约倒计时重算
+└── updateTripDates → 天气 / 预约倒计时重算
 ```
 
-**规则**：任何前端操作后，UI 状态永远以服务端返回的重算结果为准，前端不做本地推算——这是"改一处、处处更新"不出错的关键。
+**规则**：UI 以服务端返回为准，前端不做本地推算。
 
-AA 结算算法（budget.service）：净额法——每人应付 = 分摊总额 − 已付总额；正数为债权人、负数为债务人，贪心配对生成最简转账列表。
+**代付账本**（`budget.service` + `settlement.ts`）：
+- 创建/更新时强制 `payer = 「我」`；个人 splits=`[我]`，共同=`[我, ...friends]` 均分。
+- 结算：净额法；产品文案展示为各朋友 → 我 的应付额（`othersOweMe`）。
+- AA 分享：`share.service` 组 `AaShareSnapshot`；可选按朋友名过滤；前端 `AaTicket`/`aaExport` 渲染（格式与色板见 UI-design §5.8.1）。
 
 ---
 
 ## 9. 安全与配置
 
-- **鉴权**：个人自用，单用户——环境变量配置的访问密码，登录后签发 JWT（7 天有效）。分享链接接口除外（token 即权限）。
-- **密钥管理**：所有 Key（高德 Web 服务/LLM/访问密码）只放 `server/.env`，`.env` 进 `.gitignore`，仓库内提供 `.env.example`。
-- **限流**：Fastify rate-limit 插件，AI 接口单独限流（防 LLM 费用失控）。
-- **备份**：SQLite 单文件，每日 cron 复制 `data.db` 到 `backups/` 保留 7 份。
+- **鉴权**：访问密码 → JWT（7 天）。`GET /api/v1/share/:token` 除外（token 即权限）。
+- **密钥**：高德 Web / LLM / 密码只放 `server/.env`；JS Key 仅 `web/.env` 的 `VITE_*`。
+- **隐私**：`kind=trip` 剥离账单；`kind=aa` 仅共同支出。
+- **限流**：AI 接口单独限流。
+- **备份**：SQLite 文件复制即可。
 - **输入校验**：全部入参过 zod schema，Prisma 参数化查询天然防注入。
 
 ---
@@ -396,4 +411,4 @@ npm run dev        # 同时起 web(5173) 和 server(3000)，Vite 代理 /api →
 
 ---
 
-*下一步：输出《UI-design.md UI 设计规范》（基于你提供的参考图配色：暖米色系 #FAF7F2 / #EDE6DC / #C9A494 / #6F584C / #1A1A1A）。*
+*文档与实现对齐：2026-09-16。视觉规范见 [UI-design.md](./UI-design.md)；进度见 [PROGRESS.md](./PROGRESS.md)。*

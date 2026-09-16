@@ -1,7 +1,7 @@
 # 行迹 TripTrace · AI 编程助手规则
 
 > 给 Cursor 用。改代码前读本文件 + [PRD.md](./PRD.md) + [Tech-Design.md](./Tech-Design.md) + [UI-design.md](./UI-design.md) + [PROGRESS.md](./PROGRESS.md)。
-> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → **PROGRESS / 定稿 IA 优先于过时章节** → UI-design 定长什么样 → 本文件定怎么写代码。
+> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → UI-design 定长什么样 → 本文件定怎么写代码。三份设计文档已于 2026-09-16 与实现对齐；日常进度仍以 [PROGRESS.md](./PROGRESS.md) §0 为准。
 > 行程主视图定稿：**地图 + 切日点阵 + 目录抽屉**；无独立地图 Tab、无蛇形时间轴主界面。
 
 ---

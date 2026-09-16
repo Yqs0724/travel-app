@@ -1,7 +1,7 @@
 # 行迹 TripTrace · 项目进度交接
 
 > 日期：**2026-09-16** ｜ 形态：个人自用 Web（移动端优先）  
-> 文档：`PRD.md` / `Tech-Design.md` / `UI-design.md` / `Agents.md`  
+> 文档：`PRD.md`（v1.2）/ `Tech-Design.md`（v1.1）/ `UI-design.md`（v1.1，含 AA 小票 §5.8.1）/ `Agents.md`  
 > GitHub：https://github.com/Yqs0724/travel-app （`main`，本地 `.env` **不**入库）
 
 ---
