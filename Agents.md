@@ -1,7 +1,8 @@
 # 行迹 TripTrace · AI 编程助手规则
 
-> 给 Cursor 用。改代码前读本文件 + [PRD.md](./PRD.md) + [Tech-Design.md](./Tech-Design.md) + [UI-design.md](./UI-design.md)。
-> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → UI-design 定长什么样 → 本文件定怎么写代码。
+> 给 Cursor 用。改代码前读本文件 + [PRD.md](./PRD.md) + [Tech-Design.md](./Tech-Design.md) + [UI-design.md](./UI-design.md) + [PROGRESS.md](./PROGRESS.md)。
+> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → **PROGRESS / 定稿 IA 优先于过时章节** → UI-design 定长什么样 → 本文件定怎么写代码。
+> 行程主视图定稿：**地图 + 切日点阵 + 目录抽屉**；无独立地图 Tab、无蛇形时间轴主界面。
 
 ---
 
@@ -50,9 +51,10 @@ server/src/
 
 路由（不要自创路径）：
 
-- `/trips`、`/trips/:id/plan`、`/trips/:id/map`、`/trips/:id/budget`、`/trips/:id/checklist`
-- `/share/:token` 只读
-- API 前缀 `/api/v1`；写操作带 `clientRequestId`
+- `/trips`（登录后重定向最近行程或新建）、`/trips/:id/plan`、`/trips/:id/ai`、`/trips/:id/checklist`、`/trips/:id/budget`
+- `/trips/:id/map` → 重定向到 `plan`（保留兼容，勿再做独立地图页）
+- `/share/:token` 只读（同构地图+目录，无编辑、无账单）
+- API 前缀 `/api/v1`
 
 ---
 
@@ -71,7 +73,7 @@ server/src/
 | 响应 | `{ code, data, message? }`；`code===0` 成功 | 每张接口一种 envelope |
 | 错误码 | `400xx` 参数/资源，`401xx` 鉴权，`502xx` 外部故障 | 用 HTTP 200 塞随机字符串当错误 |
 
-鉴权：环境变量访问密码 → JWT（7 天）。`GET /api/v1/share/:token` 除外。分享接口**不得**返回账单、AA、成员付款明细。
+鉴权：环境变量访问密码 → JWT（7 天）。`GET /api/v1/share/:token` 除外（行程只读或 AA 账单 kind）。行程分享不得返回个人账单；`kind=aa` 仅返回共同支出 + 附图。
 
 LLM：只经 `providers/llm.ts`（OpenAI 兼容、baseURL 可配）。输出必须 JSON Schema + zod 校验，失败重试 1 次。地理聚类用代码算，**禁止让模型算距离**。AI 草稿不落库，用户确认后才写 Prisma。
 
@@ -85,7 +87,7 @@ providers：超时 5s；POI 详情内存缓存 24h；天气缓存 1h。
 - 类型：能推断不重复写；跨端 DTO 放共享类型（建 `shared/` 或 server 导出类型给 web），禁止复制粘贴两份 interface。
 - 命名：行程 `trip`，条目 `item`，交通段 `leg`，费用 `expense`。不要 `journey` / `spot` 混用。
 - Prisma 字段名跟 [Tech-Design.md](./Tech-Design.md) schema 走，改 schema 必须 `prisma migrate`，禁止只改 TS 类型。
-- 金额：后端 `Float` 按「元」；展示两位小数。AA 用净额法 + 贪心配对，逻辑只在 `budget.service.ts`。
+- 金额：后端 `Float` 按「元」；展示两位小数。结算用净额法 + 贪心配对（`settlement.ts`），前端展示为「朋友应付我」。
 - 排序：`seq` 整数；重排一次提交有序 id 数组，后端事务更新。不做链表。
 - 注释：只写非显而易见的约束（例如「前端不本地推算耗时」）。用中文或英文均可，同一文件内统一。
 - 非平凡逻辑留**一个**可跑的检查：`*.test.ts` 或 `scripts/` 下 assert 自检。不引入 Jest 全家桶以外的新测试框架（已有什么用什么；没有则用 node 内置 `node:test`）。
@@ -100,7 +102,9 @@ providers：超时 5s；POI 详情内存缓存 24h；天气缓存 1h。
 - `PATCH /items/:id/leg`
 - 增删 item 的响应同样带整天数据
 
-`planner.service` 单事务顺序：改 seq / 改 mode → 调 `providers/amap` 重算相邻 leg（走 POI 缓存）→ 顺延当日时间轴 → 同步门票/路费预算条目 → 返回整天。
+`planner.service` 单事务顺序：改 seq / 改 mode → 调 `providers/amap` 重算相邻 leg（走 POI 缓存）→ 顺延当日时刻 → 返回整天。门票/路费估价只留在行程字段，**不**自动写入账单。
+
+记账模型：只记「我掏出去的钱」；`payer` 固定同行人首位；个人=`splits` 仅自己，共同=勾选朋友均分；结算文案为「朋友应付我」。
 
 触发联动对照 PRD 第 6 节，缺一条就是 bug，不要只改当前屏幕。
 
@@ -114,8 +118,9 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 
 - 颜色只来自 `web/src/index.css` 的 `:root` 变量。JSX/Tailwind 禁止新 hex。
 - 间距只准 4/8/12/16/24；卡片圆角 20；触控高度 ≥ 44。
-- 行程内底栏仅四项：时间轴 / 地图 / 清单 / 记账。
-- 地图挂了：时间轴仍可编辑。LLM 挂了：手动加地点仍可用。
+- 行程内底栏仅四项：**行程 / AI / 清单 / 记账**（无独立地图 Tab）。
+- 行程 Tab：切日点阵 + MapView + 目录抽屉；地图挂了时目录与半屏仍可编辑。LLM 挂了：手动加地点仍可用。
+- **新 overlay 必须用 `components/Sheet`（含 OverlayProvider 互斥）**；禁止再手写 `fixed inset-0` + `bg-ink/*` 遮罩。目录抽屉仍是页内 chrome，不算阻断 Sheet。
 - V1 不做暗色模式、不做 Lottie、不做新字体包。
 
 ---
@@ -125,11 +130,11 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 1. 先读将改模块的 PRD 小节 + Tech-Design 对应节 + 本文件第 3、5 节。
 2. 能改现有 service 一处解决，就不要加新抽象层。
 3. 先实现手动闭环，再接 AI / 天气 / 路况。外部依赖用 provider 假数据也能跑通页面。
-4. 改联动：同时打开时间轴、地图数据、预算相关调用点，确认只在 service 算一次。
+4. 改联动：同时打开目录/地图数据、预算相关调用点，确认只在 service 算一次。
 5. 本地：`npm run dev`（web 5173，server 3000，Vite 代理 `/api`）。不要把 Key 写进命令行历史能看到的文档。
 6. 提交前：类型能过、手动路径能用、`.env` 未入库。
 
-建议实现顺序（V1.0）：Prisma schema → trip CRUD → 时间轴增删改排 → MapView 标注连线 → 交通/耗时代理 → 清单模板 → 记账 + AA → AI extract/plan（确认后写入）→ 只读分享。
+V1.0 已落地主线：Prisma → trip CRUD → 行程编排（增删改排 + leg）→ MapView 标注连线 → 目录抽屉 → 清单 → 记账 + AA → AI extract/plan → 只读分享。后续按 PROGRESS「下一步」按需做 P1。
 
 ---
 

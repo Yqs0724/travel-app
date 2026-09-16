@@ -1,0 +1,45 @@
+:root {
+  --bg: #faf7f2;
+  --surface: #faf7f2;
+  --surface-2: #ede6dc;
+  --accent: #c9a494;
+  --accent-dark: #6f584c;
+  --ink: #1a1a1a;
+  --ink-muted: rgba(111, 88, 76, 0.7);
+  --scrim: rgba(26, 26, 26, 0.55);
+  --line: #ede6dc;
+  --ok: #3d8b6e;
+  --warn: #c47a2c;
+  --danger: #b54a3c;
+  --info: #4a7c8c;
+  --z-drawer: 10;
+  --z-sheet: 50;
+  --z-lightbox: 60;
+  --radius: 20px;
+  --font: "PingFang SC", "HarmonyOS Sans", "Noto Sans SC", system-ui, sans-serif;
+  --shadow: 0 4px 16px rgba(111, 88, 76, 0.08);
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 隐藏高德署名（个人自用；正式对外需核对高德服务条款） */
+.amap-logo,
+.amap-copyright {
+  display: none !important;
+}

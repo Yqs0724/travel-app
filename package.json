@@ -1,0 +1,20 @@
+{
+  "name": "triptrace",
+  "private": true,
+  "workspaces": [
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:web": "npm run dev --workspace=web",
+    "build": "npm run build --workspace=web && npm run build --workspace=server",
+    "db:migrate": "npm run db:migrate --workspace=server",
+    "db:push": "npm run db:push --workspace=server",
+    "db:generate": "npm run db:generate --workspace=server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

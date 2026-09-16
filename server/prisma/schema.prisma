@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Trip {
+  id          String          @id @default(cuid())
+  title       String
+  startDate   DateTime
+  endDate     DateTime
+  members     String // JSON: ["我","张三"]
+  currency    String          @default("CNY")
+  editVersion Int             @default(0) // 弱协作乐观锁
+  days        TripDay[]
+  expenses    Expense[]
+  checklist   ChecklistItem[]
+  shareLinks  ShareLink[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model TripDay {
+  id     String          @id @default(cuid())
+  tripId String
+  date   DateTime
+  note   String?
+  trip   Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  items  ItineraryItem[]
+
+  @@unique([tripId, date])
+}
+
+model ItineraryItem {
+  id            String         @id @default(cuid())
+  dayId         String
+  seq           Int
+  poiId         String?
+  poi           POI?           @relation(fields: [poiId], references: [id])
+  customName    String?
+  startTime     String?
+  durationMin   Int?
+  ticketPrice   Float?
+  needBook      Boolean        @default(false)
+  bookAheadDays Int?
+  bookUrl       String?
+  note          String?
+  day           TripDay        @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  legToNext     TransportLeg?
+}
+
+model POI {
+  id        String          @id @default(cuid())
+  amapId    String?         @unique
+  name      String
+  lng       Float
+  lat       Float
+  city      String?
+  category  String?
+  openHours String?
+  rawJson   String?
+  items     ItineraryItem[]
+}
+
+model TransportLeg {
+  id          String         @id @default(cuid())
+  fromItemId  String         @unique
+  mode        String
+  distanceM   Int?
+  durationMin Int?
+  cost        Float?
+  fromItem    ItineraryItem  @relation(fields: [fromItemId], references: [id], onDelete: Cascade)
+}
+
+model Expense {
+  id         String         @id @default(cuid())
+  tripId     String
+  category   String
+  amount     Float
+  payer      String
+  itemId     String?
+  date       DateTime
+  note       String?
+  receiptExt String? // jpg|png|webp，有值即有附图
+  splits     ExpenseSplit[]
+  trip       Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}
+
+model ExpenseSplit {
+  id        String  @id @default(cuid())
+  expenseId String
+  member    String
+  ratio     Float   @default(1)
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+}
+
+model ChecklistItem {
+  id       String  @id @default(cuid())
+  tripId   String
+  category String
+  name     String
+  checked  Boolean @default(false)
+  source   String  @default("custom")
+  trip     Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}
+
+model ShareLink {
+  id           String    @id @default(cuid())
+  tripId       String
+  token        String    @unique
+  canEdit      Boolean   @default(false)
+  /** trip=行程只读；aa=仅共同支出账单 */
+  kind         String    @default("trip")
+  passwordHash String? // canEdit 时必填：salt:hex
+  expiresAt    DateTime?
+  trip         Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}

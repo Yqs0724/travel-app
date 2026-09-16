@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backups/
+.DS_Store
+*.log
+.vite/
+coverage/
+web/dist/
+server/dist/
+server/data/uploads/
