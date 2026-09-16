@@ -93,8 +93,9 @@ web/
 
 ### 3.2 关键前端决策
 
-- **路由**：`/trips/:id/plan|ai|checklist|budget`；`/trips/:id/map` → 重定向 `plan`；`/share/:token`（`kind=trip` 只读行程，或 `kind=aa` 小票；可选 `?for=`）。
+- **路由**：`/trips/:id/plan|nearby|ai|checklist|budget`；`/trips/:id/map` → 重定向 `plan`；`/share/:token`（`kind=trip` 只读行程，或 `kind=aa` 小票；可选 `?for=`）。
 - **地图封装**：仅 `features/planner/MapView.tsx`；编号针、多色 leg、点芯片改 mode、飞点。
+- **周边**：`features/nearby/NearbyPanel.tsx`；锚点可选 + 关键词；半屏可跳转。
 - **记账 UI**：`ExpensePanel`；AA 票：`AaTicket` + `aaExport`（链接/HTML/PDF）。
 - **拖拽**：`dnd-kit`（已有则复用，不另引库）。
 - **离线**：行程详情可用 IndexedDB 弱网查看；写失败必须明示。
@@ -308,7 +309,7 @@ model ShareLink {
 
 | Method | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/ai/extract-pois` | 自由文本 → 候选 POI（LLM 或按行拆分 + 高德校验） |
+| POST | `/api/v1/ai/extract-pois` | 自由文本和/或截图 → 候选 POI（`mode=all|restaurants`；看图走多模态） |
 | POST | `/api/v1/ai/plan` | 按天草稿，**不落库**，确认后写入 |
 | POST | `/api/v1/ai/adjust` | 自然语言微调 → diff（**未实现**，规格保留） |
 
@@ -342,6 +343,7 @@ model ShareLink {
 | Method | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/v1/proxy/amap/poi?keyword=` | POI 搜索补全 |
+| GET | `/api/v1/proxy/amap/around?lng=&lat=&types=&keywords=&radius=` | 周边搜索（餐饮/玩乐/厕所） |
 | GET | `/api/v1/proxy/amap/route?from=&to=&mode=` | 两点距离/耗时 |
 
 ---

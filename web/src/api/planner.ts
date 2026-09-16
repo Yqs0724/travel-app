@@ -63,6 +63,7 @@ export type PoiHit = {
   city?: string;
   category?: string;
   address?: string;
+  distanceM?: number;
 };
 
 export type WriteOpts = ApiOpts & { expectedVersion?: number };
@@ -76,6 +77,26 @@ export function searchPoi(keyword: string, city?: string, opts?: ApiOpts) {
   const q = new URLSearchParams({ keyword });
   if (city) q.set("city", city);
   return api<PoiHit[]>(`/api/v1/proxy/amap/poi?${q}`, {}, opts);
+}
+
+export function searchAround(
+  opts: {
+    lng: number;
+    lat: number;
+    types?: string;
+    keywords?: string;
+    radius?: number;
+  },
+  apiOpts?: ApiOpts,
+) {
+  const q = new URLSearchParams({
+    lng: String(opts.lng),
+    lat: String(opts.lat),
+  });
+  if (opts.types) q.set("types", opts.types);
+  if (opts.keywords) q.set("keywords", opts.keywords);
+  if (opts.radius != null) q.set("radius", String(opts.radius));
+  return api<PoiHit[]>(`/api/v1/proxy/amap/around?${q}`, {}, apiOpts);
 }
 
 export type RouteHit = {

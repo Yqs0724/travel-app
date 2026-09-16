@@ -34,6 +34,14 @@ function cleanChunk(raw: string): string {
 const PLACE_HINT =
   /(?:博物馆|纪念馆|艺术馆|科技馆|展览馆|动物园|植物园|游乐园|古镇|古城|寺|庙|宫|苑|园|山|湖|海|岛|湾|滩|峡|谷|峰|林|街|巷|路|里|坊|广场|公园|景区|风景区|遗址|故居|书院|塔|桥|码头|机场|车站|高铁站|地铁站|酒店|宾馆|客栈|民宿|饭店|餐厅|火锅|咖啡|宽窄|锦里|春熙|太古|三星堆|大熊猫|都江堰|青城)/;
 
+const FOOD_HINT =
+  /(?:餐厅|饭店|酒楼|火锅|烧烤|烤肉|咖啡|咖啡馆|奶茶|小吃|面馆|面店|粉店|茶馆|酒吧|酒馆|食堂|料理|寿司|串串|冒菜|小馆|小店|美食|食堂|大排档|苍蝇馆|私房菜|本帮|川菜|粤菜|湘菜)/;
+
+const SCENIC_ONLY =
+  /(?:博物馆|纪念馆|艺术馆|科技馆|展览馆|动物园|植物园|游乐园|古镇|古城|寺|庙|宫|苑|园|山|湖|公园|广场|景区|风景区|遗址|故居|书院|塔|机场|车站|高铁站|酒店|宾馆|客栈|民宿)(?:$|[^店馆])/;
+
+export type ExtractMode = "all" | "restaurants";
+
 /** 无 LLM 时：分隔符切分 + 书名号 + 地名后缀启发式 */
 export function heuristicNames(text: string): string[] {
   const uniq: string[] = [];
@@ -77,6 +85,57 @@ export function heuristicNames(text: string): string[] {
   return out.length ? out : uniq.slice(0, 20);
 }
 
+/** 点评/攻略文案：偏餐馆店名 */
+export function heuristicRestaurantNames(text: string): string[] {
+  const uniq: string[] = [];
+  const push = (s: string) => {
+    let t = cleanChunk(s);
+    t = t
+      .replace(/^(?:推荐|必吃|打卡|探店)\s*/u, "")
+      .replace(/(?:不错|好吃|安利|强烈推荐|真的爱|绝了|可以|很棒)$/u, "")
+      .trim();
+    if (t.length < 2 || t.length > 40) return;
+    if (/^https?:\/\//i.test(t)) return;
+    if (/^\d+(\.\d+)?分/.test(t)) return;
+    if (/人均|多少钱|元\/人|打卡攻略/.test(t)) return;
+    if (SCENIC_ONLY.test(t) && !FOOD_HINT.test(t)) return;
+    if (!uniq.includes(t)) uniq.push(t);
+  };
+
+  for (const m of text.matchAll(/《([^》]{2,40})》/g)) push(m[1]!);
+  for (const m of text.matchAll(/「([^」]{2,40})」/g)) push(m[1]!);
+  for (const m of text.matchAll(/【([^】]{2,40})】/g)) push(m[1]!);
+
+  for (const m of text.matchAll(
+    /[\u4e00-\u9fffA-Za-z0-9·・]{1,20}(?:餐厅|饭店|酒楼|火锅|烧烤|咖啡馆|咖啡|小吃|面馆|面店|粉店|茶馆|酒吧|料理|寿司|串串|冒菜|小馆|私房菜)/g,
+  )) {
+    push(m[0]!);
+  }
+
+  const chunks = text.split(/[\n\r,，、;；|｜/／]+/);
+  for (const chunk of chunks) {
+    const t = cleanChunk(chunk);
+    if (!t) continue;
+    if (FOOD_HINT.test(t) || (t.length >= 2 && t.length <= 16 && /店$/.test(t))) {
+      push(t);
+    }
+  }
+
+  const ranked = [...uniq].sort((a, b) => {
+    const af = FOOD_HINT.test(a) ? 1 : 0;
+    const bf = FOOD_HINT.test(b) ? 1 : 0;
+    if (af !== bf) return bf - af;
+    return b.length - a.length;
+  });
+  const out: string[] = [];
+  for (const n of ranked) {
+    if (out.some((x) => x !== n && x.includes(n))) continue;
+    out.push(n);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 async function resolveName(name: string, city?: string): Promise<CandidatePoi> {
   try {
     const hits = await amap.searchPoi(name, city);
@@ -100,27 +159,48 @@ async function resolveName(name: string, city?: string): Promise<CandidatePoi> {
 export async function extractPois(
   text: string,
   city?: string,
+  mode: ExtractMode = "all",
+  images: llm.LlmImage[] = [],
 ): Promise<{ places: CandidatePoi[]; source: "llm" | "rules" }> {
   const trimmed = text.trim();
-  if (!trimmed) throw Object.assign(new Error("请粘贴内容"), { code: 40001 });
+  if (!trimmed && images.length === 0) {
+    throw Object.assign(new Error("请粘贴内容或添加图片"), { code: 40001 });
+  }
+  if (images.length > 3) {
+    throw Object.assign(new Error("最多 3 张图片"), { code: 40001 });
+  }
+
+  const restaurants = mode === "restaurants";
+  const system = restaurants
+    ? images.length
+      ? '从用户提供的大众点评/美食截图与文案中只提取餐馆、咖啡馆、小吃店等店名，排除纯景点与酒店。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。'
+      : '从用户粘贴的大众点评/美食攻略文案中只提取餐馆、咖啡馆、小吃店等店名，排除纯景点与酒店。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。'
+    : images.length
+      ? '从用户提供的旅行笔记截图与文案中提取景点与餐饮店名（可含酒店），忽略广告与无关文字。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。'
+      : '从用户粘贴的旅行笔记中提取景点/餐厅/酒店等地名。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。';
+  const fallback = restaurants ? heuristicRestaurantNames : heuristicNames;
+  const userText =
+    trimmed.slice(0, 8000) ||
+    (restaurants ? "请识别图中的餐馆店名。" : "请识别图中的景点与餐饮店名。");
 
   let names: string[] = [];
   let source: "llm" | "rules" = "rules";
   try {
-    const raw = await llm.chatJsonRetry(
-      '从用户粘贴的旅行笔记中提取景点/餐厅/酒店等地名。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。',
-      trimmed.slice(0, 8000),
-    );
+    const raw =
+      images.length > 0
+        ? await llm.chatJsonWithImagesRetry(system, userText, images)
+        : await llm.chatJsonRetry(system, userText);
     const parsed = namesSchema.safeParse(raw);
     if (parsed.success) {
       names = parsed.data.places.map((s) => s.trim()).filter(Boolean);
       source = "llm";
     }
-  } catch {
-    names = heuristicNames(trimmed);
+  } catch (e) {
+    if (images.length > 0) throw e; // 看图必须 LLM，不静默降级成空规则
+    names = fallback(trimmed);
   }
-  if (names.length === 0) {
-    names = heuristicNames(trimmed);
+  if (names.length === 0 && trimmed) {
+    names = fallback(trimmed);
     source = "rules";
   }
   if (names.length === 0) return { places: [], source };

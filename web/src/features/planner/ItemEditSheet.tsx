@@ -1,4 +1,5 @@
 ﻿import { FormEvent, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   MODE_LABELS,
   deleteItem,
@@ -21,6 +22,7 @@ export function ItemEditSheet({
   day,
   item,
   index,
+  tripId,
   onDayChange,
   onClose,
   writeOpts,
@@ -28,10 +30,13 @@ export function ItemEditSheet({
   day: TripDay;
   item: ItineraryItem;
   index: number;
+  /** 有则显示「周边 / 找厕所」跳转；分享页不传 */
+  tripId?: string;
   onDayChange: (day: TripDay) => void;
   onClose: () => void;
   writeOpts?: WriteOpts;
 }) {
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duration, setDuration] = useState(String(item.durationMin ?? 60));
@@ -42,6 +47,15 @@ export function ItemEditSheet({
   const [ticket, setTicket] = useState(
     item.ticketPrice != null && item.ticketPrice > 0 ? String(item.ticketPrice) : "",
   );
+
+  const hasCoords =
+    item.poi != null && Number.isFinite(item.poi.lng) && Number.isFinite(item.poi.lat);
+
+  function goNearby(mode: "food" | "toilet") {
+    if (!tripId || !hasCoords) return;
+    onClose();
+    navigate(`/trips/${tripId}/nearby?itemId=${encodeURIComponent(item.id)}&mode=${mode}`);
+  }
 
   async function apply(res: Awaited<ReturnType<typeof reorderItems>>) {
     if (isErr(res)) {
@@ -118,39 +132,68 @@ export function ItemEditSheet({
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
 
         <form onSubmit={(e) => void onSave(e)} className="space-y-3">
-          <div className="flex gap-3">
-            <label className="flex-1 text-xs text-ink-muted">
-              时刻
+          <div className="flex items-end gap-2">
+            <label className="min-w-0 flex-1 text-xs text-ink-muted">
+              <span className="mb-1 block truncate">时刻</span>
               <input
                 type="time"
-                className="mt-1 h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
               />
             </label>
-            <label className="w-28 text-xs text-ink-muted">
-              停留（分）
+            <label className="min-w-0 flex-1 text-xs text-ink-muted">
+              <span className="mb-1 block truncate">停留（分）</span>
               <input
                 type="number"
                 min={0}
-                className="mt-1 h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
               />
             </label>
-            <label className="w-28 text-xs text-ink-muted">
-              门票（元，参考估价，不进账单）
+            <label className="min-w-0 flex-1 text-xs text-ink-muted">
+              <span className="mb-1 block truncate">门票（元）</span>
               <input
                 type="number"
                 min={0}
                 step="0.01"
                 placeholder="可选"
-                className="mt-1 h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
                 value={ticket}
                 onChange={(e) => setTicket(e.target.value)}
               />
             </label>
           </div>
+          <p className="text-xs text-ink-muted">门票为参考估价，不进账单</p>
+
+          {tripId ? (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1 text-sm"
+                disabled={!hasCoords}
+                title={hasCoords ? undefined : "该点无坐标，无法查周边"}
+                onClick={() => goNearby("food")}
+              >
+                周边
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1 text-sm"
+                disabled={!hasCoords}
+                title={hasCoords ? undefined : "该点无坐标，无法找厕所"}
+                onClick={() => goNearby("toilet")}
+              >
+                找厕所
+              </Button>
+            </div>
+          ) : null}
+          {tripId && !hasCoords ? (
+            <p className="text-xs text-ink-muted">无地图坐标时不可查周边</p>
+          ) : null}
 
           <label className="flex items-center gap-2 text-sm">
             <input

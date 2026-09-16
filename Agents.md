@@ -36,7 +36,7 @@ npm workspaces monorepo：`web/` + `server/`。新文件对号入座，禁止在
 web/src/
   api/            # fetch 封装 + 类型
   components/     # 通用 UI（Button/Card/Sheet），不含业务
-  features/       # 按模块：planner | ai | checklist | budget | info | share
+  features/       # 按模块：planner | nearby | ai | checklist | budget | info | share
   stores/         # Zustand，按模块拆，不搞全局上帝 store
   hooks/          # 跨模块 hooks
   lib/            # 日期 / 金额 / 地理纯函数
@@ -51,7 +51,7 @@ server/src/
 
 路由（不要自创路径）：
 
-- `/trips`（登录后重定向最近行程或新建）、`/trips/:id/plan`、`/trips/:id/ai`、`/trips/:id/checklist`、`/trips/:id/budget`
+- `/trips`（登录后重定向最近行程或新建）、`/trips/:id/plan`、`/trips/:id/nearby`、`/trips/:id/ai`、`/trips/:id/checklist`、`/trips/:id/budget`
 - `/trips/:id/map` → 重定向到 `plan`（保留兼容，勿再做独立地图页）
 - `/share/:token`：`kind` 默认=行程只读（同构地图+目录，无账单）；`kind=aa`=共同支出小票（`AaShareView`，可带 `?for=`）
 - API 前缀 `/api/v1`
@@ -69,13 +69,13 @@ server/src/
 | 后端 | Fastify + Prisma + SQLite WAL | 业务里手写 SQL 拼接 |
 | 校验 | 入参 zod | 信任前端未校验数据 |
 | 密钥 | 只放 `server/.env`；JS Key 前端、Web 服务 Key 仅后端 | 把 Web 服务 Key / LLM Key 写进 `web/` |
-| 代理 | POI 搜索、路径规划走 `/api/v1/proxy/amap/*` | 前端直调高德 Web 服务 |
+| 代理 | POI 搜索、周边搜索、路径规划走 `/api/v1/proxy/amap/*` | 前端直调高德 Web 服务 |
 | 响应 | `{ code, data, message? }`；`code===0` 成功 | 每张接口一种 envelope |
 | 错误码 | `400xx` 参数/资源，`401xx` 鉴权，`502xx` 外部故障 | 用 HTTP 200 塞随机字符串当错误 |
 
 鉴权：环境变量访问密码 → JWT（7 天）。`GET /api/v1/share/:token` 除外（行程只读或 AA 账单 kind）。行程分享不得返回个人账单；`kind=aa` 仅返回共同支出 + 附图。
 
-LLM：只经 `providers/llm.ts`（OpenAI 兼容、baseURL 可配）。输出必须 JSON Schema + zod 校验，失败重试 1 次。地理聚类用代码算，**禁止让模型算距离**。AI 草稿不落库，用户确认后才写 Prisma。
+LLM：只经 `providers/llm.ts`（OpenAI 兼容、baseURL 可配；可多模态看图）。输出必须 JSON Schema + zod 校验，失败重试 1 次。地理聚类用代码算，**禁止让模型算距离**。AI 草稿不落库，用户确认后才写 Prisma。看图提取景点/餐饮需多模态模型（如 `deepseek-flash`）；无图时无 Key 仍可规则拆地名。
 
 providers：超时 5s；POI 详情内存缓存 24h；天气缓存 1h。
 
@@ -118,7 +118,8 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 
 - 颜色只来自 `web/src/index.css` 的 `:root` 变量。JSX/Tailwind 禁止新 hex。**唯一例外**：`AaTicket` / `aaExport` 热敏小票用独立青绿色板（见 PROGRESS §0），勿把橙强调色加回去。
 - 间距只准 4/8/12/16/24；卡片圆角 20；触控高度 ≥ 44。
-- 行程内底栏仅四项：**行程 / AI / 清单 / 记账**（无独立地图 Tab）。
+- 行程内底栏五项：**行程 / 周边 / AI / 清单 / 记账**（无独立地图 Tab）。
+- 周边 Tab：关键词自搜 + 可选锚点 + 餐饮/玩乐/厕所推荐；半屏可跳入。
 - 行程 Tab：切日点阵 + MapView + 目录抽屉；地图挂了时目录与半屏仍可编辑。LLM 挂了：手动加地点仍可用。
 - **新 overlay 必须用 `components/Sheet`（含 OverlayProvider 互斥）**；禁止再手写 `fixed inset-0` + `bg-ink/*` 遮罩。目录抽屉仍是页内 chrome，不算阻断 Sheet。
 - V1 不做暗色模式、不做 Lottie、不做新字体包。

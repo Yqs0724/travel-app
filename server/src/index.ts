@@ -23,7 +23,7 @@ config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 const port = Number(process.env.PORT ?? 3000);
 
 async function main() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, bodyLimit: 12 * 1024 * 1024 });
 
   await app.register(cors, { origin: true });
   await app.register(jwt, {

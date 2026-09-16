@@ -378,6 +378,7 @@ export function PlanPage() {
           day={day}
           item={editing.item}
           index={editing.index}
+          tripId={trip.id}
           onDayChange={(d) => {
             onDayChange(d);
             const idx = d.items.findIndex((x) => x.id === editing.item.id);

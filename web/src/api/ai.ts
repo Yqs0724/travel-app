@@ -29,10 +29,15 @@ export type DraftDay = {
   items: DraftItem[];
 };
 
-export function extractPois(text: string, city?: string) {
+export function extractPois(
+  text: string,
+  city?: string,
+  mode: "all" | "restaurants" = "all",
+  images?: Array<{ mime: "image/jpeg" | "image/png" | "image/webp"; data: string }>,
+) {
   return api<{ places: CandidatePoi[]; source: "llm" | "rules" }>("/api/v1/ai/extract-pois", {
     method: "POST",
-    body: JSON.stringify({ text, city }),
+    body: JSON.stringify({ text, city, mode, images }),
   });
 }
 

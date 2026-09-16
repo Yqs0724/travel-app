@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom";
-import { IconCheckList, IconMap, IconSpark, IconWallet } from "@/components/Icons";
+import { IconCheckList, IconMap, IconNearby, IconSpark, IconWallet } from "@/components/Icons";
 
 const tabs = [
   { to: "plan", label: "行程", Icon: IconMap },
+  { to: "nearby", label: "周边", Icon: IconNearby },
   { to: "ai", label: "AI", Icon: IconSpark },
   { to: "checklist", label: "清单", Icon: IconCheckList },
   { to: "budget", label: "记账", Icon: IconWallet },

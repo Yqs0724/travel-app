@@ -4,6 +4,7 @@ import { AiPage } from "@/pages/AiPage";
 import { BudgetPage } from "@/pages/BudgetPage";
 import { ChecklistPage } from "@/pages/ChecklistPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { NearbyPage } from "@/pages/NearbyPage";
 import { PlanPage } from "@/pages/PlanPage";
 import { RequireAuth } from "@/pages/RequireAuth";
 import { SharePage } from "@/pages/SharePage";
@@ -21,6 +22,7 @@ export function App() {
             <Route path="/trips/:id" element={<TripLayout />}>
               <Route index element={<Navigate to="plan" replace />} />
               <Route path="plan" element={<PlanPage />} />
+              <Route path="nearby" element={<NearbyPage />} />
               <Route path="ai" element={<AiPage />} />
               <Route path="map" element={<Navigate to="../plan" replace />} />
               <Route path="checklist" element={<ChecklistPage />} />

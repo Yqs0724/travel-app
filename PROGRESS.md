@@ -1,8 +1,8 @@
 # 行迹 TripTrace · 项目进度交接
 
 > 日期：**2026-09-16** ｜ 形态：个人自用 Web（移动端优先）  
-> 文档：`PRD.md`（v1.2）/ `Tech-Design.md`（v1.1）/ `UI-design.md`（v1.1，含 AA 小票 §5.8.1）/ `Agents.md`  
-> GitHub：https://github.com/Yqs0724/travel-app （`main`，本地 `.env` **不**入库）
+> 文档：`PRD.md` / `Tech-Design.md` / `UI-design.md` / `Agents.md`  
+> GitHub：https://github.com/Yqs0724/travel-app （开发分支 `NEW1`；本地 `.env` **不**入库）
 
 ---
 
@@ -16,7 +16,7 @@
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
 ### 当前状态（一句话）
-**可用个人版已落地并推 GitHub**：行程地图主视觉、AI 排程、清单、**我的代付账本**、只读/弱协作分享、**AA 小票分享**（链接/HTML/PDF）。未做的只有可选增强（见 §4）。
+**可用个人版已落地并推 GitHub（分支 `NEW1` 含周边/点评 AI/看图）**：行程地图主视觉、**周边（餐饮玩乐厕所）**、AI 排程（笔记/点评/截图）、清单、**我的代付账本**、只读/弱协作分享、**AA 小票分享**。未做的只有可选增强（见 §4）。
 
 ### 最近定稿决策（勿回退）
 | 主题 | 定稿 |
@@ -28,6 +28,9 @@
 | AA 小票 UX | 面向朋友：无朋友姓名印在票上；分享时选收件人 → `?for=` 过滤应付额；热敏收据风；**禁止**橙强调色 |
 | AA 小票视觉 | 单框线、底撕边；顶猫爪 / 底狗爪；半价金额用 `#D1DECD` 的 `\` 划掉 + 右上 `50%`；色板 `#F7F7F7` / `#D1DECD` / `#BEC0BC` / `#749469` / `#548046`（**仅** `AaTicket`/`aaExport` 例外于全局暖米色 token） |
 | 地图 | 针/路线对齐；leg 多色；点 leg 芯片可改交通方式 |
+| 底栏 | **行程 / 周边 / AI / 清单 / 记账**（五 Tab） |
+| 周边 | 锚点可选；关键词自搜；芯片餐饮/玩乐/厕所；半屏「周边」「找厕所」带 `itemId`+`mode` |
+| AI | 笔记→草稿写入；点评→仅候选复制；可上传截图看图（多模态 LLM，如 `deepseek-flash`） |
 
 ### 新窗口建议首句（可粘贴）
 > 继续开发行迹 TripTrace（`d:\cursor-projects\旅游app`）。先读 `PROGRESS.md` §0 与 `Agents.md`。不要恢复估价→账单自动同步；记账保持「我的代付账本」；AA 小票视觉与 kind=aa 分享约定勿改。本地 `.env` 已有，勿提交。
@@ -51,7 +54,7 @@
 | UI | 暖米色 token（主应用）；AA 小票独立青绿热敏色板 | 纸感工具，非社区 |
 | 后端 | Fastify + Prisma + SQLite WAL | 个人零运维 |
 | 地图 | 高德 JS Key（前端）+ Web Key（后端代理） | 服务端 Key 不泄露 |
-| AI | OpenAI 兼容 LLM（可选） | 无 Key 时按行拆分地名仍可用 |
+| AI | OpenAI 兼容 LLM（可选，可多模态） | 无 Key 时纯文字仍可规则拆地名；看图必须有视觉模型 |
 | 鉴权 | 访问密码 → JWT 7 天 | 分享接口除外（token 即权限） |
 
 **数据原则**：行程（Trip → Day → Item + Leg）是唯一数据源；增删改排后服务端整包返回当天，前端不做本地推算。
@@ -62,9 +65,10 @@
 
 ### 2.1–2.4 基建 / 壳 / 行程地图 / AI
 - [x] Prisma 全量 schema；JWT；`{ code, data, message }`；Vite `127.0.0.1`
-- [x] 顶栏行程切换 + `···`；底栏 **行程 / AI / 清单 / 记账**（无独立地图 Tab）
-- [x] 行程 Tab：切日点阵 + MapView（编号针、多色 leg、点芯片改 mode）+ 可拖目录抽屉 + 半屏编辑
-- [x] AI：提取 → 勾选 → 草稿 → 确认写入；地理分天在后端，禁止 LLM 算距离
+- [x] 顶栏行程切换 + `···`；底栏 **行程 / 周边 / AI / 清单 / 记账**
+- [x] 行程 Tab：切日点阵 + MapView（编号针、多色 leg、点芯片改 mode）+ 可拖目录抽屉 + 半屏编辑（含周边/找厕所入口）
+- [x] 周边 Tab：关键词搜 / 锚点餐饮·玩乐·厕所；`proxy/amap/around`
+- [x] AI：笔记提取 → 勾选 → 草稿 → 确认写入；点评仅候选；可截图看图；地理分天在后端，禁止 LLM 算距离
 
 ### 2.5 清单 / 记账（代付账本）
 - [x] 清单：扁平列表 + 常用套装；天气/行程智能推荐已接
@@ -72,7 +76,7 @@
 - [x] 同行人：`MembersEditor` 只管朋友；结算 `settlement.ts` 净额法
 
 ### 2.6 外部代理
-- [x] `/api/v1/proxy/amap/poi`、`/route`（无 Key → 502，手动路径仍可用）
+- [x] `/api/v1/proxy/amap/poi`、`/route`、`/around`（无 Key → 502，手动路径仍可用）
 - [x] 天气 / 预约提醒 / **当天实时路况** 图层
 
 ### 2.7 分享
@@ -110,8 +114,12 @@
 | 路径 | 说明 |
 |---|---|
 | `web/src/pages/PlanPage.tsx` | 行程 Tab |
+| `web/src/pages/NearbyPage.tsx` | 周边 Tab |
+| `web/src/features/nearby/NearbyPanel.tsx` | 周边搜索 / 厕所 / 加入 |
 | `web/src/features/planner/MapView.tsx` | 高德封装 |
 | `web/src/features/planner/DaySortableList.tsx` | 目录 + 参考价展示 |
+| `web/src/features/planner/ItemEditSheet.tsx` | 半屏编辑 + 周边入口 |
+| `web/src/features/ai/AiPlannerPanel.tsx` | AI 笔记/点评/截图 |
 | `web/src/features/budget/ExpensePanel.tsx` | 我的代付账本 UI |
 | `web/src/features/budget/AaTicket.tsx` + `aaExport.ts` | AA 热敏小票 + 导出 |
 | `web/src/features/budget/AaShareView.tsx` | `/share/:token` 的 AA 分支 |

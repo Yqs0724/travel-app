@@ -10,6 +10,8 @@ export type PoiHit = {
   city?: string;
   category?: string;
   address?: string;
+  /** 周边搜索时高德返回的直线距离（米） */
+  distanceM?: number;
 };
 
 export type RouteResult = {
@@ -91,12 +93,24 @@ export async function searchPoi(keyword: string, city?: string): Promise<PoiHit[
     throw Object.assign(new Error(String(data.info ?? "POI 搜索失败")), { code: 50201 });
   }
   const pois = (data.pois as Array<Record<string, string>> | undefined) ?? [];
-  const hits: PoiHit[] = pois
+  const hits = mapPoiRows(pois);
+
+  poiCache.set(cacheKey, { at: Date.now(), hits });
+  return hits;
+}
+
+const aroundCache = new Map<string, { at: number; hits: PoiHit[] }>();
+const AROUND_CACHE_MS = 60 * 60 * 1000;
+
+/** 供自检：把高德 pois 行映射成 PoiHit */
+export function mapPoiRows(pois: Array<Record<string, string>>): PoiHit[] {
+  return pois
     .map((p) => {
       const [lngS, latS] = (p.location ?? "").split(",");
       const lng = Number(lngS);
       const lat = Number(latS);
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+      const dist = p.distance != null && p.distance !== "" ? Number(p.distance) : NaN;
       return {
         amapId: p.id,
         name: p.name,
@@ -105,11 +119,48 @@ export async function searchPoi(keyword: string, city?: string): Promise<PoiHit[
         city: p.cityname || undefined,
         category: p.type?.split(";")[0],
         address: p.address || undefined,
+        distanceM: Number.isFinite(dist) ? Math.round(dist) : undefined,
       } satisfies PoiHit;
     })
     .filter((x) => x != null);
+}
 
-  poiCache.set(cacheKey, { at: Date.now(), hits });
+/** 周边搜索；types / keywords 至少其一 */
+export async function searchAround(opts: {
+  lng: number;
+  lat: number;
+  types?: string;
+  keywords?: string;
+  radius?: number;
+}): Promise<PoiHit[]> {
+  const types = opts.types?.trim() ?? "";
+  const keywords = opts.keywords?.trim() ?? "";
+  if (!types && !keywords) {
+    throw Object.assign(new Error("types 与 keywords 不能都为空"), { code: 40001 });
+  }
+  const radius = Math.min(50000, Math.max(1, Math.round(opts.radius ?? 1500)));
+  const lng = Number(opts.lng.toFixed(6));
+  const lat = Number(opts.lat.toFixed(6));
+  const cacheKey = `${lng},${lat}|${types}|${keywords}|${radius}`;
+  const cached = aroundCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < AROUND_CACHE_MS) return cached.hits;
+
+  const data = await amapGet("https://restapi.amap.com/v3/place/around", {
+    location: `${lng},${lat}`,
+    radius: String(radius),
+    types,
+    keywords,
+    offset: "15",
+    page: "1",
+    extensions: "base",
+    sortrule: "distance",
+  });
+  if (String(data.status) !== "1") {
+    throw Object.assign(new Error(String(data.info ?? "周边搜索失败")), { code: 50201 });
+  }
+  const pois = (data.pois as Array<Record<string, string>> | undefined) ?? [];
+  const hits = mapPoiRows(pois);
+  aroundCache.set(cacheKey, { at: Date.now(), hits });
   return hits;
 }
 

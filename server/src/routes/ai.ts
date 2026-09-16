@@ -39,11 +39,31 @@ const draftDay = z.object({
 export async function aiRoutes(app: FastifyInstance) {
   app.post("/api/v1/ai/extract-pois", async (req, reply) => {
     const parsed = z
-      .object({ text: z.string().min(1).max(20_000), city: z.string().optional() })
+      .object({
+        text: z.string().max(20_000).optional().default(""),
+        city: z.string().optional(),
+        mode: z.enum(["all", "restaurants"]).optional(),
+        images: z
+          .array(
+            z.object({
+              mime: z.enum(["image/jpeg", "image/png", "image/webp"]),
+              data: z.string().min(1).max(6_000_000),
+            }),
+          )
+          .max(3)
+          .optional(),
+      })
       .safeParse(req.body);
     if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
     try {
-      return ok(await ai.extractPois(parsed.data.text, parsed.data.city));
+      return ok(
+        await ai.extractPois(
+          parsed.data.text,
+          parsed.data.city,
+          parsed.data.mode ?? "all",
+          parsed.data.images ?? [],
+        ),
+      );
     } catch (e) {
       return sendErr(reply, e);
     }

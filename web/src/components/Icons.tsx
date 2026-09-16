@@ -130,6 +130,17 @@ export function IconPin(p: IconProps) {
   );
 }
 
+/** 周边 */
+export function IconNearby(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="5.5" />
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  );
+}
+
 /** 天气 / 建议 */
 export function IconCloud(p: IconProps) {
   return (

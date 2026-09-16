@@ -1,8 +1,19 @@
-/** OpenAI 兼容 chat；未配置 Key 抛 50202 */
+/** OpenAI 兼容 chat；未配置 Key 抛 50202。支持多模态（DeepSeek Flash 等看图模型）。 */
 
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 90_000;
 
-export async function chatJson(system: string, user: string): Promise<unknown> {
+export type LlmImage = {
+  /** 如 image/jpeg */
+  mime: string;
+  /** 纯 base64，不含 data: 前缀 */
+  data: string;
+};
+
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
+
+async function chatJsonRequest(system: string, userContent: string | ContentPart[]): Promise<unknown> {
   const key = process.env.LLM_API_KEY?.trim();
   if (!key) throw Object.assign(new Error("LLM API Key 未配置"), { code: 50202 });
 
@@ -24,7 +35,7 @@ export async function chatJson(system: string, user: string): Promise<unknown> {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userContent },
         ],
       }),
       signal: ctrl.signal,
@@ -40,7 +51,9 @@ export async function chatJson(system: string, user: string): Promise<unknown> {
     };
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw Object.assign(new Error("LLM 无返回"), { code: 50202 });
-    return JSON.parse(content) as unknown;
+    // 偶发包在 ```json 里
+    const raw = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    return JSON.parse(raw) as unknown;
   } catch (e) {
     if ((e as Error).name === "AbortError") {
       throw Object.assign(new Error("LLM 超时"), { code: 50202 });
@@ -52,11 +65,49 @@ export async function chatJson(system: string, user: string): Promise<unknown> {
   }
 }
 
+export async function chatJson(system: string, user: string): Promise<unknown> {
+  return chatJsonRequest(system, user);
+}
+
+export async function chatJsonWithImages(
+  system: string,
+  userText: string,
+  images: LlmImage[],
+): Promise<unknown> {
+  if (images.length === 0) return chatJsonRequest(system, userText);
+  const parts: ContentPart[] = [
+    { type: "text", text: userText || "请根据图片提取地点名称。" },
+    ...images.map(
+      (img): ContentPart => ({
+        type: "image_url",
+        image_url: {
+          url: `data:${img.mime};base64,${img.data}`,
+          detail: "auto",
+        },
+      }),
+    ),
+  ];
+  return chatJsonRequest(system, parts);
+}
+
 export async function chatJsonRetry(system: string, user: string): Promise<unknown> {
   try {
     return await chatJson(system, user);
   } catch (e) {
     if ((e as Error & { code?: number }).code === 50202 && !process.env.LLM_API_KEY) throw e;
     return chatJson(system, user);
+  }
+}
+
+export async function chatJsonWithImagesRetry(
+  system: string,
+  userText: string,
+  images: LlmImage[],
+): Promise<unknown> {
+  try {
+    return await chatJsonWithImages(system, userText, images);
+  } catch (e) {
+    if ((e as Error & { code?: number }).code === 50202 && !process.env.LLM_API_KEY) throw e;
+    return chatJsonWithImages(system, userText, images);
   }
 }
