@@ -3,15 +3,12 @@ import { useParams } from "react-router-dom";
 import {
   addChecklistItem,
   applyChecklistSuggestions,
-  applyTemplate,
   deleteChecklistItem,
   listChecklist,
   listChecklistSuggestions,
-  listTemplates,
   patchChecklistItem,
   type ChecklistItem,
   type ChecklistSuggestion,
-  type TemplateMeta,
 } from "@/api/checklist";
 import { isErr } from "@/api/client";
 import { Button } from "@/components/Button";
@@ -20,12 +17,12 @@ import { IconCloud, IconPlus } from "@/components/Icons";
 export function ChecklistPage() {
   const { id } = useParams<{ id: string }>();
   const [items, setItems] = useState<ChecklistItem[]>([]);
-  const [templates, setTemplates] = useState<TemplateMeta[]>([]);
   const [suggestions, setSuggestions] = useState<ChecklistSuggestion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
-  const [showPacks, setShowPacks] = useState(false);
+  /** 建议默认收起，避免占满手机屏 */
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   async function apply(res: Awaited<ReturnType<typeof listChecklist>>) {
     if (isErr(res)) {
@@ -44,21 +41,10 @@ export function ChecklistPage() {
   useEffect(() => {
     if (!id) return;
     void listChecklist(id).then(apply);
-    void listTemplates().then((res) => {
-      if (!isErr(res)) setTemplates(res.data);
-    });
     void reloadSuggestions(id);
   }, [id]);
 
   const done = items.filter((i) => i.checked).length;
-
-  async function onTemplate(templateId: string) {
-    if (!id) return;
-    setBusy(true);
-    await apply(await applyTemplate(id, templateId));
-    await reloadSuggestions(id);
-    setBusy(false);
-  }
 
   async function onToggle(it: ChecklistItem) {
     await apply(await patchChecklistItem(it.id, { checked: !it.checked }));
@@ -119,39 +105,49 @@ export function ChecklistPage() {
       </form>
 
       {suggestions.length > 0 && (
-        <div className="mt-4 rounded-card border border-line bg-surface px-3 py-3 shadow-warm">
-          <div className="flex items-center justify-between gap-2">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-accent-dark">
-              <IconCloud size={16} />
-              根据行程 / 天气建议
-            </p>
+        <div className="mt-4 rounded-card border border-line bg-surface px-3 py-2 shadow-warm">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left text-sm font-medium text-accent-dark"
+              onClick={() => setShowSuggestions((v) => !v)}
+              aria-expanded={showSuggestions}
+            >
+              <IconCloud size={16} className="shrink-0" />
+              <span className="min-w-0 truncate">根据行程 / 天气建议</span>
+              <span className="shrink-0 text-xs font-normal text-ink-muted">
+                {suggestions.length} 条 · {showSuggestions ? "收起" : "展开"}
+              </span>
+            </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => void onAddAll()}
-              className="text-xs text-accent-dark underline"
+              className="shrink-0 py-1 text-xs text-accent-dark underline"
             >
               全部加入
             </button>
           </div>
-          <ul className="mt-2 space-y-2">
-            {suggestions.map((s) => (
-              <li key={`${s.reason}-${s.name}`} className="flex items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px]">{s.name}</p>
-                  <p className="text-[11px] text-ink-muted">{s.reason}</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void onAddOne(s)}
-                  className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs text-accent-dark"
-                >
-                  加入
-                </button>
-              </li>
-            ))}
-          </ul>
+          {showSuggestions ? (
+            <ul className="mt-2 space-y-2 border-t border-line pt-2">
+              {suggestions.map((s) => (
+                <li key={`${s.reason}-${s.name}`} className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[14px]">{s.name}</p>
+                    <p className="text-[11px] text-ink-muted">{s.reason}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void onAddOne(s)}
+                    className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs text-accent-dark"
+                  >
+                    加入
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       )}
 
@@ -199,31 +195,6 @@ export function ChecklistPage() {
           </li>
         ))}
       </ul>
-
-      <div className="mt-6">
-        <button
-          type="button"
-          className="text-xs text-ink-muted"
-          onClick={() => setShowPacks((v) => !v)}
-        >
-          {showPacks ? "收起常用套装" : "从常用套装追加（可选）"}
-        </button>
-        {showPacks && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                disabled={busy}
-                onClick={() => void onTemplate(t.id)}
-                className="h-8 rounded-full border border-line bg-surface px-3 text-xs text-accent-dark"
-              >
-                + {t.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

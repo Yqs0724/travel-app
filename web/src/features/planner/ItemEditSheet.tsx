@@ -132,40 +132,40 @@ export function ItemEditSheet({
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
 
         <form onSubmit={(e) => void onSave(e)} className="space-y-3">
-          <div className="flex items-end gap-2">
+          <label className="block text-xs text-ink-muted">
+            <span className="mb-1 block text-center font-medium text-accent-dark">出发时刻</span>
+            <input
+              type="time"
+              className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+            />
+          </label>
+          <div className="flex gap-2">
             <label className="min-w-0 flex-1 text-xs text-ink-muted">
-              <span className="mb-1 block truncate">时刻</span>
-              <input
-                type="time"
-                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-              />
-            </label>
-            <label className="min-w-0 flex-1 text-xs text-ink-muted">
-              <span className="mb-1 block truncate">停留（分）</span>
+              <span className="mb-1 block text-center">停留（分）</span>
               <input
                 type="number"
                 min={0}
-                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
               />
             </label>
             <label className="min-w-0 flex-1 text-xs text-ink-muted">
-              <span className="mb-1 block truncate">门票（元）</span>
+              <span className="mb-1 block text-center">门票（元）</span>
               <input
                 type="number"
                 min={0}
                 step="0.01"
                 placeholder="可选"
-                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
                 value={ticket}
                 onChange={(e) => setTicket(e.target.value)}
               />
             </label>
           </div>
-          <p className="text-xs text-ink-muted">门票为参考估价，不进账单</p>
+          <p className="text-center text-xs text-ink-muted">门票为参考估价，不进账单</p>
 
           {tripId ? (
             <div className="flex gap-2">

@@ -33,12 +33,11 @@ export function AaShareView({
   function onPrintPdf() {
     setBusy(true);
     setErr(null);
-    try {
-      printAaHtml(exportAaBundle(view));
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "打印失败");
-    }
-    setBusy(false);
+    void printAaHtml(exportAaBundle(view))
+      .catch((e) => {
+        setErr(e instanceof Error ? e.message : "打印失败");
+      })
+      .finally(() => setBusy(false));
   }
 
   return (

@@ -181,20 +181,45 @@ export function downloadAaHtml(filename: string, html: string) {
   URL.revokeObjectURL(url);
 }
 
-export function printAaHtml(html: string) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank", "noopener,noreferrer");
-  if (!w) {
-    URL.revokeObjectURL(url);
-    throw new Error("浏览器拦截了弹窗，请允许后重试");
-  }
-  const revoke = () => URL.revokeObjectURL(url);
-  w.addEventListener("load", () => {
-    w.focus();
-    w.print();
-    // ponytail: 打印后延迟释放；升级可改 iframe 内打印
-    window.setTimeout(revoke, 60_000);
+export function printAaHtml(html: string): Promise<void> {
+  // 手机端 window.open 常被拦；用隐藏 iframe 同页打印更稳
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("title", "AA 小票打印");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0";
+    document.body.appendChild(iframe);
+    const win = iframe.contentWindow;
+    const doc = iframe.contentDocument ?? win?.document;
+    if (!win || !doc) {
+      iframe.remove();
+      reject(new Error("无法打开打印预览，请改用下载 HTML"));
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    const cleanup = () => {
+      window.setTimeout(() => iframe.remove(), 1500);
+    };
+
+    const run = () => {
+      try {
+        win.focus();
+        win.print();
+        resolve();
+      } catch {
+        reject(new Error("打印失败，请改用下载 HTML，再用浏览器打开后存 PDF"));
+      } finally {
+        cleanup();
+      }
+    };
+
+    if (doc.readyState === "complete") {
+      window.setTimeout(run, 50);
+    } else {
+      iframe.addEventListener("load", () => window.setTimeout(run, 50), { once: true });
+    }
   });
 }
 

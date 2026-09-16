@@ -36,6 +36,11 @@ function SortRow({
     transition,
   };
 
+  const hasDetail =
+    item.needBook ||
+    (item.ticketPrice != null && item.ticketPrice > 0) ||
+    (item.legToNext?.cost != null && item.legToNext.cost > 0);
+
   return (
     <li
       ref={setNodeRef}
@@ -44,7 +49,7 @@ function SortRow({
     >
       <button
         type="button"
-        className="flex w-8 shrink-0 touch-none items-center justify-center text-ink-muted"
+        className="flex w-7 shrink-0 touch-none items-center justify-center text-ink-muted"
         aria-label="拖动排序"
         {...attributes}
         {...listeners}
@@ -54,16 +59,20 @@ function SortRow({
       <button
         type="button"
         aria-current={active ? "true" : undefined}
-        className={`flex min-w-0 flex-1 items-start gap-3 rounded-btn px-2 py-3 text-left ${
-          active ? "bg-accent/25" : ""
-        }`}
+        className={`flex min-w-0 flex-1 gap-2 rounded-btn px-1.5 py-3 text-left ${
+          hasDetail ? "items-start" : "items-center"
+        } ${active ? "bg-accent/25" : ""}`}
         onClick={onOpen}
       >
-        <span className="w-6 shrink-0 text-xs font-semibold tabular-nums text-accent-dark">
-          {index + 1}
-        </span>
-        <span className="w-12 shrink-0 text-[13px] tabular-nums text-ink-muted">
-          {item.startTime ?? "—"}
+        <span
+          className={`flex w-10 shrink-0 flex-col items-center gap-0.5 ${hasDetail ? "pt-0.5" : ""}`}
+        >
+          <span className="text-sm font-semibold tabular-nums leading-none text-accent-dark">
+            {index + 1}
+          </span>
+          <span className="text-[11px] tabular-nums leading-tight text-ink-muted">
+            {item.startTime ?? "—"}
+          </span>
         </span>
         <span className="min-w-0 flex-1">
           <span

@@ -55,10 +55,11 @@ export function ExpensePanel({
   const [preview, setPreview] = useState<string | null>(null);
 
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("food");
+  const [category, setCategory] = useState("other");
   const [shared, setShared] = useState(false);
   const [friendOn, setFriendOn] = useState<string[]>([]);
   const [note, setNote] = useState("");
+  const [showCats, setShowCats] = useState(false);
 
   async function refresh() {
     const [e, s, t] = await Promise.all([
@@ -108,16 +109,21 @@ export function ExpensePanel({
       setError("共同支出请至少勾选一位朋友");
       return;
     }
+    const shop = note.trim();
+    if (!shop) {
+      setError("请填写店名");
+      return;
+    }
     const body = {
       category,
       amount: n,
-      note: note.trim() || null,
+      note: shop,
       splits: buildSplits(),
     };
     setBusy(true);
     const res = editingId
       ? await updateExpense(editingId, body, apiOpts)
-      : await addExpense(tripId, { ...body, note: note.trim() || undefined }, apiOpts);
+      : await addExpense(tripId, { ...body, note: shop }, apiOpts);
     setBusy(false);
     if (isErr(res)) {
       setError(res.message);
@@ -138,6 +144,7 @@ export function ExpensePanel({
     setAmount(String(exp.amount));
     setCategory(exp.category);
     setNote(exp.note ?? "");
+    setShowCats(Boolean(exp.category && exp.category !== "other"));
     const others = exp.splits.map((s) => s.member).filter((m) => m !== me);
     setShared(others.length > 0);
     setFriendOn(others.filter((m) => friends.includes(m)));
@@ -149,10 +156,12 @@ export function ExpensePanel({
     setEditingId(null);
     setAmount("");
     setNote("");
-    setCategory("food");
+    setCategory("other");
+    setShowCats(false);
     setShared(false);
     setFriendOn([]);
     setShowForm(true);
+    setError(null);
   }
 
   function closeForm() {
@@ -237,17 +246,6 @@ export function ExpensePanel({
         </p>
       </div>
 
-      {sum && Object.keys(sum.byCategory).length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs text-ink-muted">
-          {Object.entries(sum.byCategory).map(([k, v]) => (
-            <li key={k} className="flex justify-between tabular-nums">
-              <span>{CATEGORY_LABELS[k] ?? k}</span>
-              <span>{yuan(v)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
       {error && !showForm && <p className="mt-3 text-sm text-danger">{error}</p>}
 
       <Button type="button" className="mt-4 w-full gap-2" onClick={openNew}>
@@ -275,19 +273,39 @@ export function ExpensePanel({
             required
             autoFocus
           />
-          <div className="flex flex-wrap gap-1.5">
-            {CATS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setCategory(c)}
-                className={`h-8 rounded-full px-3 text-xs ${
-                  category === c ? "bg-accent text-accent-dark" : "bg-surface-2 text-accent-dark"
-                }`}
-              >
-                {CATEGORY_LABELS[c]}
-              </button>
-            ))}
+          <input
+            className="h-11 w-full rounded-full bg-surface-2 px-4 text-sm outline-none"
+            placeholder="店名，如：蜀大侠火锅"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            required
+          />
+
+          <div>
+            <button
+              type="button"
+              className="text-xs text-ink-muted"
+              onClick={() => setShowCats((v) => !v)}
+            >
+              分类（可选）· {CATEGORY_LABELS[category] ?? category}
+              {showCats ? " · 收起" : " · 展开"}
+            </button>
+            {showCats ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {CATS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCategory(c)}
+                    className={`h-8 rounded-full px-3 text-xs ${
+                      category === c ? "bg-accent text-accent-dark" : "bg-surface-2 text-accent-dark"
+                    }`}
+                  >
+                    {CATEGORY_LABELS[c]}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
@@ -332,12 +350,6 @@ export function ExpensePanel({
           {allowAddMember && (
             <MembersEditor members={members} onChange={(next) => void persistMembers(next)} />
           )}
-          <input
-            className="h-11 w-full rounded-full bg-surface-2 px-4 text-sm outline-none"
-            placeholder="备注（可选）"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
           <div className="flex gap-2">
             <Button type="submit" className="flex-1" disabled={busy}>
               {editingId ? "保存" : "记上"}
@@ -352,6 +364,8 @@ export function ExpensePanel({
       <ul className="mt-4 space-y-2">
         {expenses.map((exp) => {
           const sharedExp = isSharedExpense(exp, me);
+          const title = exp.note?.trim() || CATEGORY_LABELS[exp.category] || exp.category;
+          const catLabel = CATEGORY_LABELS[exp.category] ?? exp.category;
           return (
             <li
               key={exp.id}
@@ -365,24 +379,25 @@ export function ExpensePanel({
                   onClick={() => openEdit(exp)}
                 >
                   <div className="flex justify-between gap-2">
-                    <span className="text-[15px] font-medium">
-                      {CATEGORY_LABELS[exp.category] ?? exp.category}
+                    <span className="min-w-0 truncate text-[15px] font-medium">
+                      {title}
                       {sharedExp && (
                         <span className="ml-1.5 text-[11px] font-normal text-info">共同</span>
                       )}
                     </span>
-                    <span className="tabular-nums text-[15px] font-semibold">
+                    <span className="shrink-0 tabular-nums text-[15px] font-semibold">
                       {yuan(exp.amount)}
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-ink-muted">
+                    {exp.note?.trim() ? catLabel : null}
+                    {exp.note?.trim() ? " · " : null}
                     {sharedExp
                       ? `与 ${exp.splits
                           .map((s) => s.member)
                           .filter((m) => m !== me)
                           .join("、")} 分摊`
                       : "个人"}
-                    {exp.note ? ` · ${exp.note}` : ""}
                     {exp.hasReceipt ? " · 有图" : ""}
                     <span className="text-ink-muted/80"> · 点按编辑</span>
                   </p>

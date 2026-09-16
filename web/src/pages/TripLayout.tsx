@@ -375,11 +375,15 @@ export function TripLayout() {
   async function printAa() {
     const view = aaView();
     if (!view) return;
+    setError(null);
     setAaBusy(true);
     try {
-      printAaHtml(exportAaBundle(view));
+      await printAaHtml(exportAaBundle(view));
+      setShareHint("已调起打印；在系统框里选「存储为 PDF」");
+      window.setTimeout(() => setShareHint(null), 3500);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "打印失败");
+      setShareHint(e instanceof Error ? e.message : "打印失败，请改用下载 HTML");
+      window.setTimeout(() => setShareHint(null), 4000);
     }
     setAaBusy(false);
   }
@@ -516,7 +520,13 @@ export function TripLayout() {
 
       {error && <p className="px-4 pt-3 text-sm text-danger">{error}</p>}
       {shareHint && (
-        <p className="px-4 pt-2 text-sm text-ok break-all">{shareHint}</p>
+        <p
+          className={`px-4 pt-2 text-sm break-all ${
+            /失败|无法|请改用/.test(shareHint) ? "text-danger" : "text-ok"
+          }`}
+        >
+          {shareHint}
+        </p>
       )}
       <Outlet context={{ trip, setTrip }} />
       <TripTabBar tripId={id} />
@@ -684,6 +694,8 @@ export function TripLayout() {
           setAaSheetOpen(false);
           setAaSnap(null);
           setAaFriend(null);
+          setError(null);
+          setShareHint(null);
         }}
         aria-label="分享 AA 账单"
       >

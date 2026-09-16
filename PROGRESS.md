@@ -11,7 +11,8 @@
 ### 怎么开干
 1. 读本文件 §0–§2 + `Agents.md` 硬规则；改 UI 再看 `UI-design.md`。
 2. 仓库根：`npm install` → `npm run db:generate` → `npm run db:push` → `npm run dev`  
-   - web `127.0.0.1:5173`，server `:3000`，`/api` 已代理。  
+   - web `127.0.0.1:5173`（本机）或 `http://<电脑局域网IP>:5173`（手机同 WiFi）；server `:3000`，`/api` 已代理。  
+   - Vite 已监听 `0.0.0.0`；若手机打不开，检查 Windows 防火墙是否放行 5173。  
    - Key/密码在本地 `server/.env`、`web/.env`（参考 `*.env.example`）。开发常用密码 `triptrace`。
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
