@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
-import { hashPassword, verifyPassword } from "../lib/password.js";
 import { readReceiptFile } from "../lib/uploads.js";
 import { settle } from "./settlement.js";
 
@@ -32,6 +31,7 @@ const publicTripSelect = {
           ticketPrice: true,
           needBook: true,
           bookAheadDays: true,
+          bookRemindAt: true,
           bookUrl: true,
           poi: {
             select: {
@@ -121,29 +121,28 @@ export async function createOrGetAaShare(tripId: string) {
   };
 }
 
-/** 弱协作：链接 + 编辑密码（同行程复用 token，可改密） */
-export async function createOrUpdateEditShare(tripId: string, password: string) {
+/** 协作编辑链接（无密码；有链接即可编辑） */
+export async function createOrUpdateEditShare(tripId: string) {
   const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { id: true } });
   if (!trip) return null;
-  if (password.length < 4) {
-    throw Object.assign(new Error("编辑密码至少 4 位"), { code: 40001 });
-  }
 
-  const passwordHash = hashPassword(password);
   const existing = await prisma.shareLink.findFirst({
     where: { tripId, canEdit: true },
   });
   if (existing) {
-    await prisma.shareLink.update({
-      where: { id: existing.id },
-      data: { passwordHash },
-    });
+    // 清掉历史密码哈希
+    if (existing.passwordHash) {
+      await prisma.shareLink.update({
+        where: { id: existing.id },
+        data: { passwordHash: null },
+      });
+    }
     return { token: existing.token, expiresAt: existing.expiresAt };
   }
 
   const token = randomBytes(18).toString("base64url");
   const link = await prisma.shareLink.create({
-    data: { tripId, token, canEdit: true, kind: "trip", passwordHash },
+    data: { tripId, token, canEdit: true, kind: "trip" },
   });
   return { token: link.token, expiresAt: link.expiresAt };
 }
@@ -269,7 +268,7 @@ export async function getAaShareReceipt(token: string, expenseId: string) {
   return file;
 }
 
-export async function unlockEditShare(token: string, password: string) {
+export async function unlockEditShare(token: string) {
   const link = await prisma.shareLink.findUnique({
     where: { token },
     include: {
@@ -281,11 +280,8 @@ export async function unlockEditShare(token: string, password: string) {
       },
     },
   });
-  if (!link || !link.canEdit || !link.passwordHash) return null;
+  if (!link || !link.canEdit) return null;
   if (link.expiresAt && link.expiresAt <= new Date()) return null;
-  if (!verifyPassword(password, link.passwordHash)) {
-    throw Object.assign(new Error("编辑密码错误"), { code: 40102 });
-  }
 
   const { editVersion, members, ...tripRest } = link.trip;
   return {

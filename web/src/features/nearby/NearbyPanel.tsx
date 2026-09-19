@@ -9,6 +9,7 @@ import {
   type ItineraryItem,
   type PoiHit,
   type TripDay,
+  type WriteOpts,
 } from "@/api/planner";
 import type { TripDetail } from "@/api/trips";
 import { Button } from "@/components/Button";
@@ -34,7 +35,7 @@ const SELECT_ARROW = `url("data:image/svg+xml,${encodeURIComponent(
 )}")`;
 
 const selectClass =
-  "h-11 min-w-0 appearance-none rounded-full bg-surface-2 bg-[length:12px_12px] bg-[right_12px_center] bg-no-repeat pl-3 pr-9 text-sm text-ink outline-none";
+  "h-11 min-w-0 appearance-none rounded-full bg-surface-2 bg-[length:12px_12px] bg-[right_12px_center] bg-no-repeat pl-3 pr-9 text-sm text-accent-dark outline-none";
 
 function storageKey(tripId: string) {
   return `triptrace:nearby:${tripId}`;
@@ -85,9 +86,11 @@ function cityHint(trip: TripDetail, anchors: Anchor[]): string | undefined {
 export function NearbyPanel({
   trip,
   onDayChange,
+  writeOpts,
 }: {
   trip: TripDetail;
   onDayChange: (day: TripDay) => void;
+  writeOpts?: WriteOpts;
 }) {
   const [params, setParams] = useSearchParams();
   const anchors = useMemo(() => collectAnchors(trip), [trip]);
@@ -293,16 +296,20 @@ export function NearbyPanel({
       return;
     }
     setAddingId(hit.amapId);
-    const res = await addItem(targetDay.id, {
-      poi: {
-        name: hit.name,
-        lng: hit.lng,
-        lat: hit.lat,
-        amapId: hit.amapId,
-        city: hit.city,
-        category: hit.category,
+    const res = await addItem(
+      targetDay.id,
+      {
+        poi: {
+          name: hit.name,
+          lng: hit.lng,
+          lat: hit.lat,
+          amapId: hit.amapId,
+          city: hit.city,
+          category: hit.category,
+        },
       },
-    });
+      writeOpts,
+    );
     setAddingId(null);
     if (isErr(res)) {
       setError(res.message);
@@ -342,7 +349,7 @@ export function NearbyPanel({
           value={itemId ?? NONE}
           onChange={(e) => onPickAnchor(e.target.value)}
         >
-          <option value={NONE}>不锚定</option>
+          <option value={NONE}>未选择</option>
           {anchors.map((a) => (
             <option key={a.item.id} value={a.item.id}>
               {itemTitle(a.item)}

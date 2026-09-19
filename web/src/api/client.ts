@@ -55,7 +55,11 @@ export async function api<T>(
   const res = await fetch(path, { ...init, headers });
   const json = (await res.json()) as ApiResult<T>;
   if (json.code === 40101 || json.code === 40102) {
-    if (!(opts && "token" in opts)) clearToken();
+    if (!(opts && "token" in opts)) {
+      clearToken();
+      // keep zustand / UI in sync with localStorage
+      window.dispatchEvent(new Event("triptrace:auth-cleared"));
+    }
   }
   return json;
 }

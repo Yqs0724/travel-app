@@ -1,10 +1,12 @@
 import { config } from "dotenv";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import fastifyStatic from "@fastify/static";
 import { authPlugin } from "./plugins/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { tripRoutes } from "./routes/trips.js";
@@ -15,12 +17,16 @@ import { budgetRoutes } from "./routes/budget.js";
 import { aiRoutes } from "./routes/ai.js";
 import { shareRoutes } from "./routes/share.js";
 import { infoRoutes } from "./routes/info.js";
+import { liveRoutes } from "./routes/live.js";
 import { ok } from "./lib/response.js";
 import { purgeEstimateLinkedExpenses } from "./services/budget.service.js";
 
-config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(__dirname, "../.env") });
 
 const port = Number(process.env.PORT ?? 3000);
+const webDist =
+  process.env.WEB_DIST?.trim() || resolve(__dirname, "../../web/dist");
 
 async function main() {
   const app = Fastify({ logger: true, bodyLimit: 12 * 1024 * 1024 });
@@ -45,6 +51,23 @@ async function main() {
   await aiRoutes(app);
   await shareRoutes(app);
   await infoRoutes(app);
+  await liveRoutes(app);
+
+  if (existsSync(webDist)) {
+    await app.register(fastifyStatic, {
+      root: webDist,
+      wildcard: false,
+    });
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        return reply.code(404).send({ code: 404, data: null, message: "Not Found" });
+      }
+      if (req.url.startsWith("/api")) {
+        return reply.code(404).send({ code: 404, data: null, message: "Not Found" });
+      }
+      return reply.sendFile("index.html");
+    });
+  }
 
   await app.listen({ port, host: "0.0.0.0" });
 }

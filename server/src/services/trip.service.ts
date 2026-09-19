@@ -123,3 +123,89 @@ export async function deleteTrip(id: string) {
   await prisma.trip.delete({ where: { id } });
   return true;
 }
+
+export type PendingPlace = {
+  id: string;
+  name: string;
+  startTime?: string | null;
+  dayLabel?: string | null;
+  amapId?: string | null;
+  lng?: number | null;
+  lat?: number | null;
+  category?: string | null;
+};
+
+function parsePending(raw: string | null | undefined): PendingPlace[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v)) return [];
+    return v
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map((x, i) => ({
+        id: typeof x.id === "string" && x.id ? x.id : `p-${i}`,
+        name: typeof x.name === "string" ? x.name : "",
+        startTime: typeof x.startTime === "string" ? x.startTime : null,
+        dayLabel: typeof x.dayLabel === "string" ? x.dayLabel : null,
+        amapId: typeof x.amapId === "string" ? x.amapId : null,
+        lng: typeof x.lng === "number" ? x.lng : null,
+        lat: typeof x.lat === "number" ? x.lat : null,
+        category: typeof x.category === "string" ? x.category : null,
+      }))
+      .filter((x) => x.name.trim());
+  } catch {
+    return [];
+  }
+}
+
+export async function getPending(tripId: string): Promise<PendingPlace[] | null> {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    select: { pendingJson: true },
+  });
+  if (!trip) return null;
+  return parsePending(trip.pendingJson);
+}
+
+export async function setPending(tripId: string, places: PendingPlace[]): Promise<PendingPlace[] | null> {
+  const existing = await prisma.trip.findUnique({ where: { id: tripId }, select: { id: true } });
+  if (!existing) return null;
+  const cleaned = places
+    .map((p) => ({
+      id: p.id || `p-${Date.now()}`,
+      name: p.name.trim(),
+      startTime: p.startTime?.trim() || null,
+      dayLabel: p.dayLabel?.trim() || null,
+      amapId: p.amapId ?? null,
+      lng: p.lng ?? null,
+      lat: p.lat ?? null,
+      category: p.category ?? null,
+    }))
+    .filter((p) => p.name);
+  await prisma.trip.update({
+    where: { id: tripId },
+    data: { pendingJson: JSON.stringify(cleaned) },
+  });
+  return cleaned;
+}
+
+export async function appendPending(
+  tripId: string,
+  places: Omit<PendingPlace, "id">[],
+): Promise<PendingPlace[] | null> {
+  const cur = await getPending(tripId);
+  if (cur == null) return null;
+  const extra: PendingPlace[] = places
+    .map((p, i) => ({
+      id: `p-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+      name: p.name.trim(),
+      startTime: p.startTime?.trim() || null,
+      dayLabel: p.dayLabel?.trim() || null,
+      amapId: p.amapId ?? null,
+      lng: p.lng ?? null,
+      lat: p.lat ?? null,
+      category: p.category ?? null,
+    }))
+    .filter((p) => p.name);
+  return setPending(tripId, [...cur, ...extra]);
+}

@@ -2,11 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../lib/response.js";
 import * as ai from "../services/ai.service.js";
+import { bumpEditVersion } from "../services/planner.service.js";
 
 function sendErr(reply: { status: (c: number) => { send: (b: unknown) => unknown } }, e: unknown) {
   const err = e as Error & { code?: number };
   const code = err.code ?? 40001;
-  const http = code === 40003 ? 404 : code >= 50200 ? 502 : 400;
+  const http =
+    code === 40003 ? 404 : code === 40901 ? 409 : code >= 50200 ? 502 : 400;
   return reply.status(http).send(fail(code, err.message));
 }
 
@@ -74,11 +76,14 @@ export async function aiRoutes(app: FastifyInstance) {
       .object({
         tripId: z.string().min(1),
         pois: z.array(poiIn).min(1),
+        sourceText: z.string().max(20_000).optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
     try {
-      return ok(await ai.buildPlan(parsed.data.tripId, parsed.data.pois));
+      return ok(
+        await ai.buildPlan(parsed.data.tripId, parsed.data.pois, parsed.data.sourceText ?? ""),
+      );
     } catch (e) {
       return sendErr(reply, e);
     }
@@ -93,7 +98,61 @@ export async function aiRoutes(app: FastifyInstance) {
       .safeParse(req.body);
     if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
     try {
+      await bumpEditVersion(parsed.data.tripId);
       return ok(await ai.commitPlan(parsed.data.tripId, parsed.data.days));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.post("/api/v1/ai/adjust", async (req, reply) => {
+    const parsed = z
+      .object({
+        tripId: z.string().min(1),
+        instruction: z.string().min(1).max(500),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      return ok(await ai.proposeAdjust(parsed.data.tripId, parsed.data.instruction));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.post("/api/v1/ai/adjust/apply", async (req, reply) => {
+    const opSchema = z.discriminatedUnion("op", [
+      z.object({
+        op: z.literal("move"),
+        itemId: z.string().min(1),
+        toDayIndex: z.number().int().nonnegative(),
+        toSeq: z.number().int().nonnegative().optional(),
+      }),
+      z.object({
+        op: z.literal("remove"),
+        itemId: z.string().min(1),
+      }),
+      z.object({
+        op: z.literal("setTime"),
+        itemId: z.string().min(1),
+        startTime: z.string().regex(/^\d{1,2}:\d{2}$/),
+      }),
+      z.object({
+        op: z.literal("rename"),
+        itemId: z.string().min(1),
+        name: z.string().min(1).max(80),
+      }),
+    ]);
+    const parsed = z
+      .object({
+        tripId: z.string().min(1),
+        ops: z.array(opSchema).min(1).max(20),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      await bumpEditVersion(parsed.data.tripId);
+      return ok(await ai.applyAdjust(parsed.data.tripId, parsed.data.ops));
     } catch (e) {
       return sendErr(reply, e);
     }

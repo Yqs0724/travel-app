@@ -38,8 +38,94 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 隐藏高德署名（个人自用；正式对外需核对高德服务条款） */
-.amap-logo,
-.amap-copyright {
-  display: none !important;
+/* 数字框去掉系统上下箭头 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* 列表类滚动条：跟界面米色/棕色统一（仅挂 .scroll-warm） */
+.scroll-warm {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--surface-2);
+}
+.scroll-warm::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-warm::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.scroll-warm::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 999px;
+}
+.scroll-warm::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dark);
+}
+.scroll-warm::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 登录页字体：仿宋_GB2312 优先系统字体，不嵌入字体文件 */
+.login-art-eyebrow {
+  font-family: "FangSong_GB2312", "仿宋_GB2312", "FangSong", "STFangsong", "仿宋", serif;
+  font-weight: 500;
+}
+.login-mag-masthead {
+  font-family: "FangSong_GB2312", "仿宋_GB2312", "FangSong", "STFangsong", "仿宋", serif;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.login-scrap-title {
+  font-family: "PingFang SC", "HarmonyOS Sans", "Noto Sans SC", system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.login-art-copy {
+  font-family: "方正仿宋_GBK", "方正仿宋简体", "方正仿宋", "FZFangSong-Z02", "FZFangSong-Z02S", "FangSong_GB2312", "仿宋_GB2312", "FangSong", serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.75;
+  text-align: justify;
+  text-justify: inter-ideograph;
+  text-indent: 2em;
+  color: #6f584c;
+  -webkit-font-smoothing: antialiased;
+}
+/* 图下标签：金底小条，非艺术字 */
+.login-img-tag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  background: #ffbf53;
+  font-family: "PingFang SC", "HarmonyOS Sans", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #6f584c;
+  line-height: 1.4;
+}
+.login-fuyi-btn {
+  font-family: "FangSong_GB2312", "仿宋_GB2312", "FangSong", "STFangsong", "仿宋", serif;
+  font-weight: 700;
+}
+.login-scrap-newsprint {
+  background-color: #f0e6d2;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 11px,
+    rgba(111, 88, 76, 0.06) 11px,
+    rgba(111, 88, 76, 0.06) 12px
+  );
 }

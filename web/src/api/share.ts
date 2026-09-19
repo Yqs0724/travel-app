@@ -61,10 +61,10 @@ export function createAaShare(tripId: string) {
   );
 }
 
-export function createEditShare(tripId: string, password: string) {
+export function createEditShare(tripId: string) {
   return api<{ token: string; path: string; expiresAt: string | null }>(
     `/api/v1/trips/${tripId}/share/edit`,
-    { method: "POST", body: JSON.stringify({ password }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
@@ -72,10 +72,10 @@ export function getShare(token: string) {
   return api<ShareSnapshot>(`/api/v1/share/${token}`);
 }
 
-export function unlockShare(token: string, password: string) {
+export function unlockShare(token: string) {
   return api<{ token: string; editVersion: number; members: string; trip: ShareTrip }>(
     `/api/v1/share/${token}/unlock`,
-    { method: "POST", body: JSON.stringify({ password }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 

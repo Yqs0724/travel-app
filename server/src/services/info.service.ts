@@ -117,10 +117,19 @@ export type BookingReminder = {
   dayDate: string;
   needBook: true;
   bookAheadDays: number;
+  /** YYYY-MM-DDTHH:mm，有则展示准确提醒时刻 */
+  bookRemindAt: string | null;
   remindOn: string;
   bookUrl: string | null;
   status: "overdue" | "due" | "upcoming";
 };
+
+/** 展示用：2026-09-22T18:00 → 9.22 18:00 */
+export function formatBookRemindAt(at: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{1,2}:\d{2})/.exec(at);
+  if (!m) return at;
+  return `${Number(m[2])}.${Number(m[3])} ${m[4]}`;
+}
 
 export function computeBookingReminders(
   items: Array<{
@@ -129,6 +138,7 @@ export function computeBookingReminders(
     dayDate: Date;
     needBook: boolean;
     bookAheadDays: number | null;
+    bookRemindAt?: string | null;
     bookUrl: string | null;
     customName: string | null;
     poiName: string | null;
@@ -138,9 +148,29 @@ export function computeBookingReminders(
   const out: BookingReminder[] = [];
   for (const it of items) {
     if (!it.needBook) continue;
-    const ahead = it.bookAheadDays ?? 0;
     const dayDate = dateKeyUTC(it.dayDate);
-    const remindOn = addDaysUTC(dayDate, -ahead);
+    let remindOn: string;
+    let bookRemindAt: string | null = it.bookRemindAt?.trim() || null;
+    let ahead = it.bookAheadDays ?? 0;
+    if (bookRemindAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(bookRemindAt)) {
+      remindOn = bookRemindAt.slice(0, 10);
+      // keep ahead in sync for older clients
+      const ms =
+        Date.UTC(
+          Number(dayDate.slice(0, 4)),
+          Number(dayDate.slice(5, 7)) - 1,
+          Number(dayDate.slice(8, 10)),
+        ) -
+        Date.UTC(
+          Number(remindOn.slice(0, 4)),
+          Number(remindOn.slice(5, 7)) - 1,
+          Number(remindOn.slice(8, 10)),
+        );
+      ahead = Math.max(0, Math.round(ms / 86400000));
+    } else {
+      bookRemindAt = null;
+      remindOn = addDaysUTC(dayDate, -ahead);
+    }
     let status: BookingReminder["status"] = "upcoming";
     if (remindOn < todayISO) status = "overdue";
     else if (remindOn === todayISO) status = "due";
@@ -151,12 +181,17 @@ export function computeBookingReminders(
       dayDate,
       needBook: true,
       bookAheadDays: ahead,
+      bookRemindAt,
       remindOn,
       bookUrl: it.bookUrl,
       status,
     });
   }
-  out.sort((a, b) => a.remindOn.localeCompare(b.remindOn));
+  out.sort((a, b) => {
+    const ak = a.bookRemindAt ?? `${a.remindOn}T00:00`;
+    const bk = b.bookRemindAt ?? `${b.remindOn}T00:00`;
+    return ak.localeCompare(bk);
+  });
   return out;
 }
 
@@ -181,6 +216,7 @@ export async function getBookingReminders(tripId: string) {
       dayDate: d.date,
       needBook: it.needBook,
       bookAheadDays: it.bookAheadDays,
+      bookRemindAt: it.bookRemindAt,
       bookUrl: it.bookUrl,
       customName: it.customName,
       poiName: it.poi?.name ?? null,

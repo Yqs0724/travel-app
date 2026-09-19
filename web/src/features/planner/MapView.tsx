@@ -52,8 +52,8 @@ type AMapMap = {
   off?: (event: string, cb: () => void) => void;
 };
 
-/** 各段路线色：纸感色系内区分，避免全是同一条线 */
-const LEG_COLORS = ["#C9A494", "#6F584C", "#4A7C8C", "#3D8B6E", "#C47A2C"] as const;
+/** 各段路线色：纸感色系内区分，避免全是同一条线。总览里同一天共用一色 */
+export const LEG_COLORS = ["#C9A494", "#6F584C", "#4A7C8C", "#3D8B6E", "#C47A2C"] as const;
 
 export function pointsFromItems(items: ItineraryItem[]): MapPoint[] {
   return items
@@ -104,25 +104,6 @@ function escapeHtml(s: string) {
 
 /** 放大到该级别才显示站名 */
 const LABEL_ZOOM = 15;
-/** 交通芯片要更大缩放才出，减少近点糊叠 */
-const CHIP_ZOOM = 16;
-/** 路段直线距离短于此（米）不画芯片，改在目录/半屏改交通 */
-const CHIP_MIN_DIST_M = 500;
-
-function haversineM(
-  a: { lng: number; lat: number },
-  b: { lng: number; lat: number },
-): number {
-  const R = 6371000;
-  const toR = (d: number) => (d * Math.PI) / 180;
-  const dLat = toR(b.lat - a.lat);
-  const dLng = toR(b.lng - a.lng);
-  const la1 = toR(a.lat);
-  const la2 = toR(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
 
 /** 固定 26×26 锚点盒；showLabel 时站名挂在针下方 */
 function pinHtml(n: number, name: string, showLabel: boolean) {
@@ -139,9 +120,9 @@ function pinHtml(n: number, name: string, showLabel: boolean) {
 function legChipHtml(mode: string, durationMin: number | null, color: string) {
   const modeLabel =
     MODE_LABELS[mode as TransportMode] ?? (mode.trim() ? escapeHtml(mode) : "交通");
-  const time = durationMin != null && durationMin > 0 ? `${durationMin}′` : "?";
-  // 更紧凑，减少盖住编号针
-  return `<div style="transform:translate(-50%,-50%);padding:2px 7px;border-radius:999px;background:${color};color:#fff;font:600 10px/1.2 system-ui,sans-serif;box-shadow:0 1px 3px rgba(26,26,26,0.2);white-space:nowrap;user-select:none;cursor:pointer;border:1px solid rgba(250,247,242,0.85);opacity:0.92">${modeLabel} ${time}</div>`;
+  const text =
+    durationMin != null && durationMin > 0 ? `${modeLabel} · ${durationMin}分` : modeLabel;
+  return `<div style="transform:translate(-50%,-50%);padding:2px 7px;border-radius:999px;background:${color};color:#fff;font:600 11px/1.2 system-ui,sans-serif;box-shadow:0 1px 3px rgba(26,26,26,0.2);white-space:nowrap;user-select:none;cursor:pointer;border:1px solid rgba(250,247,242,0.85)">${text}</div>`;
 }
 
 function pointAtRatio(path: [number, number][], ratio: number): [number, number] {
@@ -176,19 +157,30 @@ function routeMode(mode: string | undefined): TransportMode {
 }
 
 export function MapView({
-  items,
+  items = [],
+  groups,
+  pinNumber,
+  showNames = false,
   focusId,
   onSelectPoint,
   onEditLeg,
   showTraffic = false,
+  emptyHint = "当天没有带坐标的地点。在目录里添加时可搜索 POI。",
   className = "",
 }: {
-  items: ItineraryItem[];
+  items?: ItineraryItem[];
+  /** 传入则按组画线，组与组之间不连。总览用：一天一组 */
+  groups?: ItineraryItem[][];
+  /** 针上的数字，默认组内序号 */
+  pinNumber?: (item: ItineraryItem, index: number, group: number) => number;
+  /** 总览缩小后也显示站名 */
+  showNames?: boolean;
   focusId?: string | null;
   onSelectPoint?: (id: string) => void;
   /** 点击路线中段交通标签 → 改交通方式 */
   onEditLeg?: (fromItemId: string) => void;
   showTraffic?: boolean;
+  emptyHint?: string;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,21 +188,37 @@ export function MapView({
   const trafficRef = useRef<AMapLayer | null>(null);
   const markersRef = useRef<AMapMarker[]>([]);
   const chipsRef = useRef<AMapMarker[]>([]);
-  const labelItemsRef = useRef<ItineraryItem[]>([]);
+  const labelItemsRef = useRef<{ item: ItineraryItem; n: number }[]>([]);
+  const showNamesRef = useRef(showNames);
+  showNamesRef.current = showNames;
+  const pinNumberRef = useRef(pinNumber);
+  pinNumberRef.current = pinNumber;
   const drawGen = useRef(0);
   const key = import.meta.env.VITE_AMAP_JS_KEY as string | undefined;
   const security = import.meta.env.VITE_AMAP_SECURITY_CODE as string | undefined;
-  const withPoi = useMemo(
-    () => items.filter((i) => i.poi && Number.isFinite(i.poi.lng) && Number.isFinite(i.poi.lat)),
-    [items],
+  const segments = useMemo(() => {
+    const src = groups ?? [items];
+    return src
+      .map((g, gi) => ({
+        gi,
+        items: g.filter((i) => i.poi && Number.isFinite(i.poi.lng) && Number.isFinite(i.poi.lat)),
+      }))
+      .filter((s) => s.items.length > 0);
+  }, [groups, groups ? 0 : items]);
+  const points = useMemo(
+    () => segments.flatMap((s) => pointsFromItems(s.items)),
+    [segments],
   );
-  const points = useMemo(() => pointsFromItems(items), [items]);
-  const pointsKey = withPoi
-    .map(
-      (i) =>
-        `${i.id}:${i.poi!.lng},${i.poi!.lat}:${i.legToNext?.mode ?? ""}:${i.legToNext?.durationMin ?? ""}`,
+  const pointsKey = `${groups ? "g" : "s"}:${segments
+    .map((s) =>
+      s.items
+        .map(
+          (i) =>
+            `${s.gi}:${i.id}:${i.poi!.lng},${i.poi!.lat}:${i.legToNext?.mode ?? ""}:${i.legToNext?.durationMin ?? ""}`,
+        )
+        .join("|"),
     )
-    .join("|");
+    .join("||")}`;
   const onSelectRef = useRef(onSelectPoint);
   onSelectRef.current = onSelectPoint;
   const onEditLegRef = useRef(onEditLeg);
@@ -220,16 +228,15 @@ export function MapView({
     const map = mapRef.current;
     if (!map) return;
     const z = map.getZoom?.() ?? 12;
-    const showLabels = z >= LABEL_ZOOM;
-    const showChips = z >= CHIP_ZOOM;
+    const showLabels = showNamesRef.current || z >= LABEL_ZOOM;
     const list = labelItemsRef.current;
     markersRef.current.forEach((m, idx) => {
-      const item = list[idx];
-      if (!item) return;
-      m.setContent?.(pinHtml(idx + 1, itemTitle(item), showLabels));
+      const row = list[idx];
+      if (!row) return;
+      m.setContent?.(pinHtml(row.n, itemTitle(row.item), showLabels));
     });
     chipsRef.current.forEach((c) => {
-      c.setMap(showChips ? map : null);
+      c.setMap(map);
     });
   }
   const syncMapChromeRef = useRef(syncMapChrome);
@@ -266,20 +273,26 @@ export function MapView({
         markersRef.current = [];
         chipsRef.current = [];
 
-        if (withPoi.length === 0) {
+        const flat = segments.flatMap((s) => s.items);
+        if (flat.length === 0) {
           labelItemsRef.current = [];
           return;
         }
 
-        labelItemsRef.current = withPoi;
+        const numbered = segments.flatMap((s) =>
+          s.items.map((item, idx) => ({
+            item,
+            n: pinNumberRef.current?.(item, idx, s.gi) ?? idx + 1,
+          })),
+        );
+        labelItemsRef.current = numbered;
         const z0 = map.getZoom?.() ?? 12;
-        const showLabels = z0 >= LABEL_ZOOM;
-        const showChips = z0 >= CHIP_ZOOM;
-        const markers = withPoi.map((item, idx) => {
+        const showLabels = showNamesRef.current || z0 >= LABEL_ZOOM;
+        const markers = numbered.map(({ item, n }) => {
           const m = new window.AMap!.Marker({
             position: [item.poi!.lng, item.poi!.lat],
             title: itemTitle(item),
-            content: pinHtml(idx + 1, itemTitle(item), showLabels),
+            content: pinHtml(n, itemTitle(item), showLabels),
             offset: new window.AMap!.Pixel(-13, -13),
             zIndex: 200,
           });
@@ -289,60 +302,59 @@ export function MapView({
         markersRef.current = markers;
         markers.forEach((m) => m.setMap(map));
 
-        for (let i = 0; i < withPoi.length - 1; i++) {
-          if (cancelled || gen !== drawGen.current) return;
-          const a = withPoi[i]!;
-          const b = withPoi[i + 1]!;
-          const from = { lng: a.poi!.lng, lat: a.poi!.lat };
-          const to = { lng: b.poi!.lng, lat: b.poi!.lat };
-          let path: [number, number][] = [
-            [from.lng, from.lat],
-            [to.lng, to.lat],
-          ];
-          const mode = a.legToNext?.mode;
-          if (mode !== "train" && mode !== "flight") {
-            const res = await fetchRoute(from, to, routeMode(mode));
-            if (!isErr(res) && res.data.polyline && res.data.polyline.length >= 2) {
-              path = res.data.polyline;
+        let lineI = 0;
+        for (const seg of segments) {
+          const dayColor = LEG_COLORS[seg.gi % LEG_COLORS.length]!;
+          for (let i = 0; i < seg.items.length - 1; i++) {
+            if (cancelled || gen !== drawGen.current) return;
+            const a = seg.items[i]!;
+            const b = seg.items[i + 1]!;
+            const from = { lng: a.poi!.lng, lat: a.poi!.lat };
+            const to = { lng: b.poi!.lng, lat: b.poi!.lat };
+            let path: [number, number][] = [
+              [from.lng, from.lat],
+              [to.lng, to.lat],
+            ];
+            const mode = a.legToNext?.mode;
+            if (mode !== "train" && mode !== "flight") {
+              const res = await fetchRoute(from, to, routeMode(mode));
+              if (!isErr(res) && res.data.polyline && res.data.polyline.length >= 2) {
+                path = res.data.polyline;
+              }
             }
-          }
-          path = snapPathEnds(path, from, to);
-          if (cancelled || gen !== drawGen.current) return;
+            path = snapPathEnds(path, from, to);
+            if (cancelled || gen !== drawGen.current) return;
 
-          const color = LEG_COLORS[i % LEG_COLORS.length]!;
-          const line = new window.AMap.Polyline({
-            path,
-            strokeColor: color,
-            strokeWeight: 5,
-            strokeOpacity: 0.92,
-            lineJoin: "round",
-            lineCap: "round",
-            zIndex: 50 + i,
-            showDir: true,
-          });
-          line.setMap(map);
-          // 芯片隐藏时仍可点线改交通
-          (line as { on?: (ev: string, cb: () => void) => void }).on?.("click", () =>
-            onEditLegRef.current?.(a.id),
-          );
+            const color = groups ? dayColor : LEG_COLORS[i % LEG_COLORS.length]!;
+            const line = new window.AMap.Polyline({
+              path,
+              strokeColor: color,
+              strokeWeight: 5,
+              strokeOpacity: 0.92,
+              lineJoin: "round",
+              lineCap: "round",
+              zIndex: 50 + lineI,
+              showDir: true,
+            });
+            line.setMap(map);
+            (line as { on?: (ev: string, cb: () => void) => void }).on?.("click", () =>
+              onEditLegRef.current?.(a.id),
+            );
 
-          const leg = a.legToNext;
-          const segM = haversineM(from, to);
-          if (leg && segM >= CHIP_MIN_DIST_M) {
-            const pos = pointAtRatio(path, 0.4);
-            const at = { lng: pos[0], lat: pos[1] };
-            // 贴太近端点就别画，避免盖住编号针
-            if (haversineM(at, from) >= 100 && haversineM(at, to) >= 100) {
+            const leg = a.legToNext;
+            if (leg) {
+              const pos = pointAtRatio(path, 0.5);
               const chip = new window.AMap.Marker({
                 position: pos,
                 content: legChipHtml(leg.mode, leg.durationMin, color),
                 offset: new window.AMap!.Pixel(0, 0),
-                zIndex: 60 + i,
+                zIndex: 60 + lineI,
               });
               chip.on("click", () => onEditLegRef.current?.(a.id));
               chipsRef.current.push(chip);
-              if (showChips) chip.setMap(map);
+              chip.setMap(map);
             }
+            lineI++;
           }
         }
 
@@ -357,7 +369,7 @@ export function MapView({
     return () => {
       cancelled = true;
     };
-  }, [key, security, withPoi, pointsKey]);
+  }, [key, security, pointsKey]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -406,18 +418,18 @@ export function MapView({
 
   if (!key) {
     return (
-      <div className={`flex items-center justify-center bg-surface-2 px-4 text-center text-sm text-ink-muted ${className}`}>
+      <div className={`flex items-center justify-center bg-surface-2 px-4 text-center text-sm text-ink-muted touch-none ${className}`} data-map>
         未配置 VITE_AMAP_JS_KEY，地图不可用；目录仍可编辑。
       </div>
     );
   }
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative touch-none ${className}`} data-map>
       <div ref={containerRef} className="absolute inset-0 bg-surface-2" />
       {points.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-2/80 px-4 text-center text-sm text-ink-muted">
-          当天没有带坐标的地点。在目录里添加时可搜索 POI。
+          {emptyHint}
         </div>
       )}
     </div>

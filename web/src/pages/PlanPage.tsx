@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { isErr } from "@/api/client";
 import {
+  formatReminderWhen,
   getBookingReminders,
   getDayTraffic,
   getTripWeather,
@@ -11,11 +12,13 @@ import {
 } from "@/api/info";
 import {
   MODE_LABELS,
+  clearDayItems,
   itemTitle,
   updateLeg,
   type ItineraryItem,
   type TransportMode,
   type TripDay,
+  type WriteOpts,
 } from "@/api/planner";
 import type { TripDetail } from "@/api/trips";
 import { Button } from "@/components/Button";
@@ -24,13 +27,14 @@ import { Sheet } from "@/components/Sheet";
 import { AddPlaceForm } from "@/features/planner/AddPlaceForm";
 import { DaySortableList } from "@/features/planner/DaySortableList";
 import { ItemEditSheet } from "@/features/planner/ItemEditSheet";
-import { MapView } from "@/features/planner/MapView";
+import { MapView, LEG_COLORS } from "@/features/planner/MapView";
 
 const LEG_MODES = Object.keys(MODE_LABELS) as TransportMode[];
 
 type Ctx = {
   trip: TripDetail | null;
   setTrip: (t: TripDetail | null | ((prev: TripDetail | null) => TripDetail | null)) => void;
+  writeOpts?: WriteOpts;
 };
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
@@ -52,30 +56,73 @@ const SNAP = { half: 42, full: 72, peek: 13 } as const;
 type Snap = "half" | "full" | "peek";
 
 export function PlanPage() {
-  const { trip, setTrip } = useOutletContext<Ctx>();
+  const { trip, setTrip, writeOpts } = useOutletContext<Ctx>();
   const [dayIndex, setDayIndex] = useState(0);
   const [editing, setEditing] = useState<{ item: ItineraryItem; index: number } | null>(null);
   const [legEditId, setLegEditId] = useState<string | null>(null);
   const [legBusy, setLegBusy] = useState(false);
   const [legError, setLegError] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [snap, setSnap] = useState<Snap>("half");
   const [dragH, setDragH] = useState<number | null>(null);
   const dragRef = useRef<{ y: number; h: number } | null>(null);
   const dotRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const daySwipe = useRef<{ x: number; y: number } | null>(null);
+  const dayIndexRef = useRef(dayIndex);
+  const dayCountRef = useRef(trip?.days.length ?? 0);
+  dayIndexRef.current = dayIndex;
+  dayCountRef.current = trip?.days.length ?? 0;
   const [weatherByDate, setWeatherByDate] = useState<Map<string, WeatherDay>>(new Map());
   const [weatherHint, setWeatherHint] = useState<string | null>(null);
   const [reminders, setReminders] = useState<BookingReminder[]>([]);
   const [traffic, setTraffic] = useState<DayTraffic | null>(null);
 
   useEffect(() => {
-    dotRefs.current[dayIndex]?.scrollIntoView({
-      inline: "center",
-      block: "nearest",
-      behavior: "smooth",
-    });
+    const el = dotRefs.current[dayIndex + 1];
+    const scroller = el?.closest("[data-day-dots]");
+    if (!el || !(scroller instanceof HTMLElement)) return;
+    const left = el.offsetLeft - (scroller.clientWidth - el.offsetWidth) / 2;
+    scroller.scrollTo({ left: Math.max(0, left) });
   }, [dayIndex]);
+
+  useEffect(() => {
+    const prev = document.body.style.touchAction;
+    document.body.style.touchAction = "pan-y";
+
+    function down(e: PointerEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input,textarea,select,[data-map]")) return;
+      daySwipe.current = { x: e.clientX, y: e.clientY };
+    }
+    function up(e: PointerEvent) {
+      const start = daySwipe.current;
+      daySwipe.current = null;
+      if (!start) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
+      // 右滑下一天，左滑上一天
+      const next = dayIndexRef.current + (dx > 0 ? 1 : -1);
+      if (next < -1 || next >= dayCountRef.current) return;
+      setDayIndex(next);
+      setEditing(null);
+      setLegEditId(null);
+      setFocusId(null);
+      setAddOpen(false);
+    }
+
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    return () => {
+      document.body.style.touchAction = prev;
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (!trip?.id) return;
@@ -97,8 +144,13 @@ export function PlanPage() {
     });
   }, [trip]);
 
+  const overview = dayIndex < 0;
+  const overviewGroups = useMemo(
+    () => (overview && trip ? trip.days.map((d) => d.items) : undefined),
+    [overview, trip],
+  );
   const day = useMemo(() => {
-    if (!trip?.days.length) return null;
+    if (!trip?.days.length || dayIndex < 0) return null;
     const i = Math.min(dayIndex, trip.days.length - 1);
     return trip.days[i] ?? null;
   }, [trip, dayIndex]);
@@ -137,7 +189,11 @@ export function PlanPage() {
     (next: TripDay) => {
       setTrip((prev) => {
         if (!prev) return prev;
-        return { ...prev, days: prev.days.map((d) => (d.id === next.id ? next : d)) };
+        return {
+          ...prev,
+          editVersion: next.editVersion ?? prev.editVersion,
+          days: prev.days.map((d) => (d.id === next.id ? next : d)),
+        };
       });
     },
     [setTrip],
@@ -159,7 +215,7 @@ export function PlanPage() {
     if (!legFrom?.legToNext) return;
     setLegBusy(true);
     setLegError(null);
-    const res = await updateLeg(legFrom.id, mode);
+    const res = await updateLeg(legFrom.id, mode, writeOpts);
     setLegBusy(false);
     if (isErr(res)) {
       setLegError(res.message || "更新失败");
@@ -167,6 +223,23 @@ export function PlanPage() {
     }
     onDayChange(res.data);
     setLegEditId(null);
+  }
+
+  async function onClearDay() {
+    if (!day || day.items.length === 0 || clearing) return;
+    if (!confirm(`清空今天的 ${day.items.length} 个地点？不可恢复`)) return;
+    setClearing(true);
+    setLegError(null);
+    const res = await clearDayItems(day.id, writeOpts);
+    setClearing(false);
+    if (isErr(res)) {
+      setLegError(res.message || "清空失败");
+      return;
+    }
+    onDayChange(res.data);
+    setEditing(null);
+    setLegEditId(null);
+    setFocusId(null);
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -202,21 +275,33 @@ export function PlanPage() {
 
   const dayDate = day ? dayMeta(day.date, dayIndex) : null;
 
+  function goDay(i: number) {
+    setDayIndex(i);
+    setEditing(null);
+    setLegEditId(null);
+    setFocusId(null);
+    setAddOpen(false);
+  }
+
   return (
     <div className="relative flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden">
       <div className="shrink-0 px-4 pb-2 pt-3">
         <p className="text-center text-sm font-semibold tabular-nums">
-          {dayDate?.title}
-          {dayWeather?.warn && (
+          {overview ? "全程总览" : dayDate?.title}
+          {!overview && dayWeather?.warn && (
             <span className="ml-1 text-xs font-medium text-warn" title={dayWeather.summary ?? "异常天气"}>
               · 天气注意
             </span>
           )}
         </p>
-        <p className={`mt-0.5 text-center text-[11px] ${weatherLine.warn ? "text-warn" : "text-ink-muted"}`}>
-          {weatherLine.text}
-        </p>
-        {traffic && (
+        {overview ? (
+          <p className="mt-0.5 text-center text-[11px] text-ink-muted">同色是同一天，点下面某一天去调整</p>
+        ) : (
+          <p className={`mt-0.5 text-center text-[11px] ${weatherLine.warn ? "text-warn" : "text-ink-muted"}`}>
+            {weatherLine.text}
+          </p>
+        )}
+        {!overview && traffic && (
           <p
             className={`mt-0.5 text-center text-[11px] ${
               traffic.status != null && traffic.status >= 3 ? "text-warn" : "text-ink-muted"
@@ -225,8 +310,27 @@ export function PlanPage() {
             {traffic.summary}
           </p>
         )}
-        <div className="mt-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div
+          className="mt-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          data-day-dots
+        >
           <div className="mx-auto flex w-max justify-center gap-0.5">
+            <button
+              type="button"
+              ref={(el) => {
+                dotRefs.current[0] = el;
+              }}
+              aria-label="全程总览"
+              aria-current={overview ? "true" : undefined}
+              onClick={() => goDay(-1)}
+              className="relative flex shrink-0 items-center justify-center p-2"
+            >
+              <span
+                className={`block h-2.5 w-4 rounded-full ${
+                  overview ? "bg-accent" : "border border-accent-dark/30 bg-transparent"
+                }`}
+              />
+            </button>
             {trip.days.map((d, i) => {
               const meta = dayMeta(d.date, i);
               const active = i === dayIndex;
@@ -235,18 +339,12 @@ export function PlanPage() {
                 <button
                   key={d.id}
                   ref={(el) => {
-                    dotRefs.current[i] = el;
+                    dotRefs.current[i + 1] = el;
                   }}
                   type="button"
                   aria-label={meta.title}
                   aria-current={active ? "true" : undefined}
-                  onClick={() => {
-                    setDayIndex(i);
-                    setEditing(null);
-                    setLegEditId(null);
-                    setFocusId(null);
-                    setAddOpen(false);
-                  }}
+                  onClick={() => goDay(i)}
                   className="relative flex shrink-0 items-center justify-center p-2"
                 >
                   <span
@@ -270,11 +368,13 @@ export function PlanPage() {
           <ul className="space-y-1">
             {urgentReminders.slice(0, 3).map((r) => (
               <li key={r.itemId} className="flex items-center gap-2 text-xs">
-                <span className={r.status === "overdue" ? "text-danger" : "text-info"}>
-                  {r.status === "overdue" ? "已过期" : "今日"}
+                <span
+                  className={`shrink-0 tabular-nums ${r.status === "overdue" ? "text-danger" : "text-info"}`}
+                >
+                  {r.status === "overdue" ? `已过期 ${formatReminderWhen(r)}` : formatReminderWhen(r)}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{r.title}</span>
-                {r.bookUrl ? (
+                {r.bookUrl?.match(/^https?:\/\//i) ? (
                   <a
                     href={r.bookUrl}
                     target="_blank"
@@ -283,9 +383,11 @@ export function PlanPage() {
                   >
                     去预约
                   </a>
-                ) : (
-                  <span className="shrink-0 text-ink-muted">提前{r.bookAheadDays}天</span>
-                )}
+                ) : r.bookUrl ? (
+                  <span className="max-w-[5.5rem] shrink-0 truncate text-ink-muted" title={r.bookUrl}>
+                    {r.bookUrl}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -293,7 +395,19 @@ export function PlanPage() {
       )}
 
       <div className="relative z-0 min-h-0 flex-1 isolate">
-        {day ? (
+        {overview && overviewGroups ? (
+          <MapView
+            groups={overviewGroups}
+            pinNumber={(_item, _idx, group) => group + 1}
+            showNames
+            emptyHint="这次行程还没有带坐标的地点"
+            onSelectPoint={(id) => {
+              const i = trip.days.findIndex((d) => d.items.some((it) => it.id === id));
+              if (i >= 0) goDay(i);
+            }}
+            className="h-full w-full"
+          />
+        ) : day ? (
           <MapView
             items={day.items}
             focusId={focusId}
@@ -331,31 +445,74 @@ export function PlanPage() {
           aria-label="拖动调整目录高度"
         >
           <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-line" />
-          <p className="text-center text-sm font-semibold">
-            今日 · {dayDate?.short ?? ""} · {items.length} 站
-            {noCoordCount > 0 && (
+          <p className="relative text-center text-sm font-semibold">
+            {overview
+              ? `全程 · ${trip.days.reduce((n, d) => n + d.items.length, 0)} 站`
+              : `今日 · ${dayDate?.short ?? ""} · ${items.length} 站`}
+            {!overview && noCoordCount > 0 && (
               <span className="ml-1 text-xs font-normal text-warn">（{noCoordCount} 站无坐标）</span>
+            )}
+            {!overview && items.length > 0 && (
+              <button
+                type="button"
+                className="absolute right-0 top-0 text-xs font-normal text-danger disabled:opacity-50"
+                disabled={clearing}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onClearDay();
+                }}
+              >
+                {clearing ? "清空中…" : "清空"}
+              </button>
             )}
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-          {items.length === 0 && !addOpen ? (
+          {overview ? (
+            <ul>
+              {trip.days.map((d, i) => {
+                const meta = dayMeta(d.date, i);
+                return (
+                  <li key={d.id} className="border-b border-line py-2">
+                    <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => goDay(i)}>
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: LEG_COLORS[i % LEG_COLORS.length] }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="text-sm font-semibold">{meta.title}</span>
+                        <span className="mt-0.5 block truncate text-xs text-ink-muted">
+                          {d.items.length === 0 ? "空" : d.items.map(itemTitle).join("、")}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-ink-muted">{d.items.length} 站</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : items.length === 0 && !addOpen ? (
             <p className="py-4 text-center text-sm text-ink-muted">这一天还空着，先添加一站</p>
-          ) : (
-            day && (
-              <DaySortableList
-                day={day}
-                focusId={focusId}
-                onOpen={openItem}
-                onDayChange={onDayChange}
-              />
-            )
-          )}
+          ) : !overview && day ? (
+            <DaySortableList
+              day={day}
+              focusId={focusId}
+              onOpen={openItem}
+              onDayChange={onDayChange}
+              writeOpts={writeOpts}
+            />
+          ) : null}
 
-          {addOpen ? (
+          {!overview && (addOpen ? (
             <div className="pt-3">
-              <AddPlaceForm day={day!} onDayChange={onDayChange} onDone={() => setAddOpen(false)} />
+              <AddPlaceForm
+                day={day!}
+                onDayChange={onDayChange}
+                onDone={() => setAddOpen(false)}
+                writeOpts={writeOpts}
+              />
             </div>
           ) : (
             <button
@@ -369,7 +526,7 @@ export function PlanPage() {
               <IconPin size={16} />
               添加地点
             </button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -387,6 +544,7 @@ export function PlanPage() {
             else setEditing(null);
           }}
           onClose={() => setEditing(null)}
+          writeOpts={writeOpts}
         />
       )}
 

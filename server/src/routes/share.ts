@@ -28,15 +28,11 @@ export async function shareRoutes(app: FastifyInstance) {
     });
   });
 
-  /** 弱协作：生成/更新可编辑链接（需登录） */
+  /** 协作：生成/复用可编辑链接（无密码） */
   app.post("/api/v1/trips/:id/share/edit", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ password: z.string().min(4) }).safeParse(req.body);
-    if (!body.success) {
-      return reply.status(400).send(fail(40001, "编辑密码至少 4 位"));
-    }
     try {
-      const link = await shareService.createOrUpdateEditShare(id, body.data.password);
+      const link = await shareService.createOrUpdateEditShare(id);
       if (!link) return reply.status(404).send(fail(40003, "行程不存在"));
       return ok({
         token: link.token,
@@ -87,15 +83,11 @@ export async function shareRoutes(app: FastifyInstance) {
     }
   });
 
-  /** 输入编辑密码 → 短期 JWT（仅可改该行程） */
+  /** 协作链接一点即编辑 JWT（无密码） */
   app.post("/api/v1/share/:token/unlock", async (req, reply) => {
     const { token } = req.params as { token: string };
-    const body = z.object({ password: z.string().min(1) }).safeParse(req.body);
-    if (!body.success) {
-      return reply.status(400).send(fail(40001, "请输入编辑密码"));
-    }
     try {
-      const unlocked = await shareService.unlockEditShare(token, body.data.password);
+      const unlocked = await shareService.unlockEditShare(token);
       if (!unlocked) return reply.status(404).send(fail(40003, "分享不存在或不可编辑"));
       const editToken = await reply.jwtSign(
         { sub: "editor", tripId: unlocked.tripId },
@@ -109,8 +101,7 @@ export async function shareRoutes(app: FastifyInstance) {
       });
     } catch (e) {
       const err = e as Error & { code?: number };
-      const http = err.code === 40102 ? 401 : 400;
-      return reply.status(http).send(fail(err.code ?? 40001, err.message));
+      return reply.status(400).send(fail(err.code ?? 40001, err.message));
     }
   });
 }

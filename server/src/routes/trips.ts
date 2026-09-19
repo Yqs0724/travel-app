@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../lib/response.js";
 import * as tripService from "../services/trip.service.js";
+import * as review from "../services/review.service.js";
 
 const createSchema = z.object({
   title: z.string().min(1).max(80),
@@ -35,6 +36,13 @@ export async function tripRoutes(app: FastifyInstance) {
     const trip = await tripService.getTrip(id);
     if (!trip) return reply.status(404).send(fail(40003, "行程不存在"));
     return ok(trip);
+  });
+
+  app.get("/api/v1/trips/:id/review", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const data = await review.getTripReview(id);
+    if (!data) return reply.status(404).send(fail(40003, "行程不存在"));
+    return ok(data);
   });
 
   app.patch("/api/v1/trips/:id", async (req, reply) => {
@@ -71,5 +79,62 @@ export async function tripRoutes(app: FastifyInstance) {
     const deleted = await tripService.deleteTrip(id);
     if (!deleted) return reply.status(404).send(fail(40003, "行程不存在"));
     return ok({ id });
+  });
+
+  app.get("/api/v1/trips/:id/pending", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const list = await tripService.getPending(id);
+    if (!list) return reply.status(404).send(fail(40003, "行程不存在"));
+    return ok(list);
+  });
+
+  app.put("/api/v1/trips/:id/pending", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = z
+      .object({
+        places: z.array(
+          z.object({
+            id: z.string().min(1),
+            name: z.string().min(1).max(80),
+            startTime: z.string().max(16).nullable().optional(),
+            dayLabel: z.string().max(40).nullable().optional(),
+            amapId: z.string().nullable().optional(),
+            lng: z.number().nullable().optional(),
+            lat: z.number().nullable().optional(),
+            category: z.string().nullable().optional(),
+          }),
+        ),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    const list = await tripService.setPending(id, parsed.data.places);
+    if (!list) return reply.status(404).send(fail(40003, "行程不存在"));
+    return ok(list);
+  });
+
+  app.post("/api/v1/trips/:id/pending", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = z
+      .object({
+        places: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(80),
+              startTime: z.string().max(16).nullable().optional(),
+              dayLabel: z.string().max(40).nullable().optional(),
+              amapId: z.string().nullable().optional(),
+              lng: z.number().nullable().optional(),
+              lat: z.number().nullable().optional(),
+              category: z.string().nullable().optional(),
+            }),
+          )
+          .min(1)
+          .max(80),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    const list = await tripService.appendPending(id, parsed.data.places);
+    if (!list) return reply.status(404).send(fail(40003, "行程不存在"));
+    return ok(list);
   });
 }

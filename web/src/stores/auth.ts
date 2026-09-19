@@ -4,14 +4,14 @@ import { login as loginApi } from "@/api/trips";
 
 type AuthState = {
   token: string | null;
-  login: (password: string) => Promise<string | null>;
+  login: () => Promise<string | null>;
   logout: () => void;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: getToken(),
-  login: async (password) => {
-    const res = await loginApi(password);
+  login: async () => {
+    const res = await loginApi();
     if (isErr(res)) return res.message;
     setToken(res.data.token);
     set({ token: res.data.token });
@@ -22,3 +22,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null });
   },
 }));
+
+if (typeof window !== "undefined") {
+  window.addEventListener("triptrace:auth-cleared", () => {
+    useAuthStore.getState().logout();
+  });
+}

@@ -30,6 +30,7 @@ export type ItineraryItem = {
   ticketPrice: number | null;
   needBook: boolean;
   bookAheadDays: number | null;
+  bookRemindAt: string | null;
   bookUrl: string | null;
   note: string | null;
   legToNext: TransportLeg | null;
@@ -54,6 +55,15 @@ export const MODE_LABELS: Record<TransportMode, string> = {
   train: "高铁",
   flight: "飞机",
 };
+
+export function legLabel(
+  leg: { mode: string; durationMin: number | null } | null | undefined,
+): string | null {
+  if (!leg) return null;
+  const mode = MODE_LABELS[leg.mode as TransportMode] ?? (leg.mode.trim() || "交通");
+  if (leg.durationMin != null && leg.durationMin > 0) return `${mode} · 约 ${leg.durationMin} 分`;
+  return mode;
+}
 
 export type PoiHit = {
   amapId: string;
@@ -154,6 +164,7 @@ export function updateItem(
     note: string | null;
     needBook: boolean;
     bookAheadDays: number | null;
+    bookRemindAt: string | null;
     bookUrl: string | null;
     ticketPrice: number | null;
   }>,
@@ -169,6 +180,20 @@ export function updateItem(
 export function deleteItem(id: string, opts?: WriteOpts) {
   return api<TripDay>(
     `/api/v1/items/${id}`,
+    {
+      method: "DELETE",
+      body:
+        opts?.expectedVersion != null
+          ? JSON.stringify({ expectedVersion: opts.expectedVersion })
+          : undefined,
+    },
+    opts,
+  );
+}
+
+export function clearDayItems(dayId: string, opts?: WriteOpts) {
+  return api<TripDay>(
+    `/api/v1/days/${dayId}/items`,
     {
       method: "DELETE",
       body:

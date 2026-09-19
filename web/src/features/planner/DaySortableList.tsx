@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -15,7 +15,14 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { isErr } from "@/api/client";
-import { itemTitle, reorderItems, type ItineraryItem, type TripDay, type WriteOpts } from "@/api/planner";
+import {
+  itemTitle,
+  legLabel,
+  reorderItems,
+  type ItineraryItem,
+  type TripDay,
+  type WriteOpts,
+} from "@/api/planner";
 
 function SortRow({
   item,
@@ -65,14 +72,11 @@ function SortRow({
         onClick={onOpen}
       >
         <span
-          className={`flex w-10 shrink-0 flex-col items-center gap-0.5 ${hasDetail ? "pt-0.5" : ""}`}
+          className={`flex w-6 shrink-0 items-center justify-center text-sm font-semibold tabular-nums text-accent-dark ${
+            hasDetail ? "pt-0.5" : ""
+          }`}
         >
-          <span className="text-sm font-semibold tabular-nums leading-none text-accent-dark">
-            {index + 1}
-          </span>
-          <span className="text-[11px] tabular-nums leading-tight text-ink-muted">
-            {item.startTime ?? "—"}
-          </span>
+          {index + 1}
         </span>
         <span className="min-w-0 flex-1">
           <span
@@ -154,15 +158,21 @@ export function DaySortableList({
       {error && <p className="py-1 text-xs text-danger">{error}</p>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(ev) => void onDragEnd(ev)}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-          <ul className="divide-y divide-line">
+          <ul>
             {day.items.map((item, index) => (
-              <SortRow
-                key={item.id}
-                item={item}
-                index={index}
-                active={focusId === item.id}
-                onOpen={() => onOpen(item, index)}
-              />
+              <Fragment key={item.id}>
+                <SortRow
+                  item={item}
+                  index={index}
+                  active={focusId === item.id}
+                  onOpen={() => onOpen(item, index)}
+                />
+                {index < day.items.length - 1 && item.legToNext && (
+                  <li className="pb-1 pl-[3.4rem] text-[11px] text-ink-muted">
+                    {legLabel(item.legToNext)}
+                  </li>
+                )}
+              </Fragment>
             ))}
           </ul>
         </SortableContext>

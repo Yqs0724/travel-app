@@ -24,7 +24,10 @@ const addSchema = z
     ticketPrice: z.number().nonnegative().optional(),
     needBook: z.boolean().optional(),
     bookAheadDays: z.number().int().nonnegative().optional(),
-    bookUrl: z.string().url().optional().or(z.literal("")),
+    bookRemindAt: z
+      .union([z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), z.literal("")])
+      .optional(),
+    bookUrl: z.string().max(500).optional(),
     note: z.string().optional(),
     modeToNext: z.string().optional(),
     clientRequestId: z.string().optional(),
@@ -43,7 +46,12 @@ const updateSchema = z.object({
   ticketPrice: z.number().nonnegative().nullable().optional(),
   needBook: z.boolean().optional(),
   bookAheadDays: z.number().int().nonnegative().nullable().optional(),
-  bookUrl: z.string().nullable().optional(),
+  bookRemindAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    .nullable()
+    .optional(),
+  bookUrl: z.string().max(500).nullable().optional(),
   note: z.string().nullable().optional(),
   clientRequestId: z.string().optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
@@ -124,6 +132,21 @@ export async function plannerRoutes(app: FastifyInstance) {
       await assertEditorTrip(req, tripId);
       if (tripId) await planner.bumpEditVersion(tripId, expectedVersion);
       const day = await planner.removeItem(id);
+      return ok(await planner.attachEditVersion(day!));
+    } catch (e) {
+      return handleErr(reply, e);
+    }
+  });
+
+  app.delete("/api/v1/days/:dayId/items", async (req, reply) => {
+    const { dayId } = req.params as { dayId: string };
+    const parsed = deleteSchema.safeParse(req.body ?? {});
+    const expectedVersion = parsed.success ? parsed.data.expectedVersion : undefined;
+    try {
+      const tripId = await planner.tripIdForDay(dayId);
+      await assertEditorTrip(req, tripId);
+      if (tripId) await planner.bumpEditVersion(tripId, expectedVersion);
+      const day = await planner.clearDayItems(dayId);
       return ok(await planner.attachEditVersion(day!));
     } catch (e) {
       return handleErr(reply, e);

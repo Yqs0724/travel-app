@@ -150,6 +150,17 @@ export function IconCloud(p: IconProps) {
   );
 }
 
+/** 旅行回顾 */
+export function IconReview(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M5 5.5h10.5A2.5 2.5 0 0 1 18 8v11.5H7.5A2.5 2.5 0 0 0 5 22" />
+      <path d="M5 5.5V22" />
+      <path d="M9 9.5h6M9 13h6M9 16.5h4" />
+    </svg>
+  );
+}
+
 /** 解锁 */
 export function IconUnlock(p: IconProps) {
   return (

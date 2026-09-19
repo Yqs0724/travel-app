@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import * as amap from "../providers/amap.js";
 import * as llm from "../providers/llm.js";
-import { addItem } from "./planner.service.js";
+import { addItem, moveItemToDay, removeItem, updateItem } from "./planner.service.js";
 
 export type CandidatePoi = {
   name: string;
@@ -177,7 +177,7 @@ export async function extractPois(
       : '从用户粘贴的大众点评/美食攻略文案中只提取餐馆、咖啡馆、小吃店等店名，排除纯景点与酒店。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。'
     : images.length
       ? '从用户提供的旅行笔记截图与文案中提取景点与餐饮店名（可含酒店），忽略广告与无关文字。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。'
-      : '从用户粘贴的旅行笔记中提取景点/餐厅/酒店等地名。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。';
+      : '从用户粘贴的旅行笔记中提取景点/餐厅/酒店等地名。保留用户原文里的地名，不要换成另一个景区（「黄山九寨」不要写成「黄山」）。只输出 JSON：{"places":["名称",...]}，最多 20 个，不要解释。';
   const fallback = restaurants ? heuristicRestaurantNames : heuristicNames;
   const userText =
     trimmed.slice(0, 8000) ||
@@ -288,12 +288,142 @@ function orderNearest(pois: PlanPoiIn[]): PlanPoiIn[] {
   return [...path, ...rest];
 }
 
-function defaultStart(seq: number): string {
-  const h = 9 + Math.floor(seq * 2);
-  return `${String(Math.min(h, 20)).padStart(2, "0")}:00`;
+type DayRef =
+  | { kind: "dom"; day: number }
+  | { kind: "md"; month: number; day: number }
+  | { kind: "index"; index: number };
+
+type TextGroup = { ref: DayRef; body: string; tail: string };
+
+const PLACE_SUFFIX =
+  /(?:博物馆|纪念馆|艺术馆|科技馆|展览馆|风景区|景区|公园|高铁站|车站|酒店|宾馆|站)$/u;
+
+/** 「4号：A、B；5号：C」按日历日切开；「然后…」归到该日的下一天 */
+export function parseDayGroups(text: string): TextGroup[] {
+  const re = /第\s*(\d+)\s*天|(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]|(\d{1,2})\s*号/g;
+  const hits: { start: number; end: number; ref: DayRef }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const ref: DayRef = m[1]
+      ? { kind: "index", index: Number(m[1]) - 1 }
+      : m[2] && m[3]
+        ? { kind: "md", month: Number(m[2]), day: Number(m[3]) }
+        : { kind: "dom", day: Number(m[4]) };
+    if (ref.kind === "dom" && (ref.day < 1 || ref.day > 31)) continue;
+    if (ref.kind === "index" && (ref.index < 0 || ref.index > 60)) continue;
+    hits.push({ start: m.index, end: m.index + m[0].length, ref });
+  }
+  if (!hits.length) return [];
+
+  return hits.map((h, i) => {
+    const raw = text.slice(h.end, i + 1 < hits.length ? hits[i + 1]!.start : text.length);
+    const parts = raw.split(/\s*(?:然后|接着|之后|随后)\s*/);
+    const clean = (s: string) => s.replace(/^[\s:：.、,，;；]+/, "").replace(/[;；。]+$/, "").trim();
+    return { ref: h.ref, body: clean(parts[0] ?? ""), tail: clean(parts.slice(1).join(" ")) };
+  });
 }
 
-export async function buildPlan(tripId: string, pois: PlanPoiIn[]): Promise<DraftDay[]> {
+function ymd(iso: string): { month: number; day: number } {
+  return { month: Number(iso.slice(5, 7)), day: Number(iso.slice(8, 10)) };
+}
+
+function resolveDay(ref: DayRef, dates: { month: number; day: number }[]): number | null {
+  if (ref.kind === "index") return ref.index < dates.length ? ref.index : null;
+  if (ref.kind === "md") {
+    const i = dates.findIndex((d) => d.month === ref.month && d.day === ref.day);
+    return i >= 0 ? i : null;
+  }
+  const hits = dates.flatMap((d, i) => (d.day === ref.day ? [i] : []));
+  return hits.length ? hits[0]! : null;
+}
+
+function stripParen(s: string): string {
+  return s.replace(/（[^）]*）|\([^)]*\)/g, "");
+}
+
+/** ponytail: 短名（<3 字且后面还是汉字）不算命中，避免「成都」粘上「成都东」。升级：接分词。 */
+function indexOfName(body: string, key: string): number {
+  let from = 0;
+  while (from < body.length) {
+    const i = body.indexOf(key, from);
+    if (i < 0) return -1;
+    const next = body[i + key.length] ?? "";
+    if (key.length < 3 && /[\u4e00-\u9fff]/.test(next)) {
+      from = i + 1;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+function mentionIndex(body: string, poiName: string): number {
+  const name = poiName.replace(/\s+/g, "");
+  const stripped = name.replace(PLACE_SUFFIX, "");
+  const keys = [name];
+  if (stripped.length >= 2 && stripped !== name) keys.push(stripped);
+  for (let len = stripped.length - 1; len >= 2; len--) keys.push(stripped.slice(-len));
+  const uniq = [...new Set(keys)].sort((a, b) => b.length - a.length);
+  for (const key of uniq) {
+    const i = indexOfName(body, key);
+    if (i >= 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * 原文写了「N号 / 第N天」时按那个日期放，不再按纬度切天。
+ * 没有日期标记则返回 null，交给 clusterAndOrder。
+ */
+export function assignPoisToDays(
+  pois: PlanPoiIn[],
+  dayDates: string[],
+  sourceText: string,
+): PlanPoiIn[][] | null {
+  const groups = parseDayGroups(sourceText);
+  if (!groups.length || dayDates.length === 0) return null;
+
+  const dates = dayDates.map(ymd);
+  const buckets: PlanPoiIn[][] = dayDates.map(() => []);
+  const used = new Set<number>();
+  let matched = false;
+  let tailAt = 0;
+
+  const take = (dayIdx: number, body: string) => {
+    if (!body.trim() || dayIdx < 0 || dayIdx >= buckets.length) return;
+    const plain = stripParen(body);
+    const ranked = pois
+      .map((p, i) => ({ p, i, at: mentionIndex(plain, p.name) }))
+      .filter((x) => x.at >= 0 && !used.has(x.i))
+      .sort((a, b) => a.at - b.at || b.p.name.length - a.p.name.length);
+    for (const x of ranked) {
+      used.add(x.i);
+      buckets[dayIdx]!.push(x.p);
+    }
+  };
+
+  for (const g of groups) {
+    const idx = resolveDay(g.ref, dates);
+    if (idx == null) continue;
+    matched = true;
+    take(idx, g.body);
+    const next = idx + 1 < dayDates.length ? idx + 1 : idx;
+    tailAt = next;
+    if (g.tail) take(next, g.tail);
+  }
+  if (!matched) return null;
+
+  for (let i = 0; i < pois.length; i++) {
+    if (!used.has(i)) buckets[tailAt]!.push(pois[i]!);
+  }
+  return buckets;
+}
+
+export async function buildPlan(
+  tripId: string,
+  pois: PlanPoiIn[],
+  sourceText = "",
+): Promise<DraftDay[]> {
   if (pois.length === 0) throw Object.assign(new Error("请先确认至少一个地点"), { code: 40001 });
 
   const trip = await prisma.trip.findUnique({
@@ -303,18 +433,20 @@ export async function buildPlan(tripId: string, pois: PlanPoiIn[]): Promise<Draf
   if (!trip) throw Object.assign(new Error("行程不存在"), { code: 40003 });
   if (trip.days.length === 0) throw Object.assign(new Error("行程没有日期"), { code: 40001 });
 
-  const groups = clusterAndOrder(pois, trip.days.length);
+  const dates = trip.days.map((d) => d.date.toISOString().slice(0, 10));
+  const hinted = sourceText.trim() ? assignPoisToDays(pois, dates, sourceText) : null;
+  const groups = hinted ?? clusterAndOrder(pois, trip.days.length);
   return trip.days.map((day, i) => ({
     dayId: day.id,
     date: day.date.toISOString(),
-    items: (groups[i] ?? []).map((p, seq) => ({
+    items: (groups[i] ?? []).map((p) => ({
       name: p.name,
       amapId: p.amapId,
       lng: p.lng,
       lat: p.lat,
       city: p.city,
       category: p.category,
-      startTime: defaultStart(seq),
+      startTime: null,
       durationMin: 90,
     })),
   }));
@@ -366,5 +498,265 @@ export async function commitPlan(tripId: string, days: DraftDay[]) {
         },
       },
     },
+  });
+}
+
+const tripFullInclude = {
+  days: {
+    orderBy: { date: "asc" as const },
+    include: {
+      items: {
+        orderBy: { seq: "asc" as const },
+        include: { poi: true, legToNext: true },
+      },
+    },
+  },
+};
+
+export type AdjustOp =
+  | { op: "move"; itemId: string; toDayIndex: number; toSeq?: number }
+  | { op: "remove"; itemId: string }
+  | { op: "setTime"; itemId: string; startTime: string }
+  | { op: "rename"; itemId: string; name: string };
+
+const adjustOpsSchema = z.object({
+  summary: z.string().max(200).optional(),
+  ops: z
+    .array(
+      z.discriminatedUnion("op", [
+        z.object({
+          op: z.literal("move"),
+          itemId: z.string().min(1),
+          toDayIndex: z.number().int().nonnegative(),
+          toSeq: z.number().int().nonnegative().optional(),
+        }),
+        z.object({
+          op: z.literal("remove"),
+          itemId: z.string().min(1),
+        }),
+        z.object({
+          op: z.literal("setTime"),
+          itemId: z.string().min(1),
+          startTime: z.string().regex(/^\d{1,2}:\d{2}$/),
+        }),
+        z.object({
+          op: z.literal("rename"),
+          itemId: z.string().min(1),
+          name: z.string().min(1).max(80),
+        }),
+      ]),
+    )
+    .max(20),
+});
+
+type TripSnap = {
+  days: Array<{
+    id: string;
+    date: Date;
+    items: Array<{
+      id: string;
+      customName: string | null;
+      startTime: string | null;
+      poi: { name: string } | null;
+    }>;
+  }>;
+};
+
+function itemTitle(it: { customName: string | null; poi: { name: string } | null }) {
+  return it.poi?.name || it.customName || "未命名";
+}
+
+/** 子串或按字顺序匹配（「熊猫基地」≈「成都大熊猫繁育研究基地」） */
+function nameMatches(title: string, hint: string): boolean {
+  if (!hint) return false;
+  if (title.includes(hint) || hint.includes(title)) return true;
+  let i = 0;
+  for (const ch of title) {
+    if (ch === hint[i]) i++;
+    if (i >= hint.length) return true;
+  }
+  return false;
+}
+
+function findItemByName(trip: TripSnap, hint: string) {
+  const q = hint.trim().replace(/[《》「」]/g, "");
+  if (!q) return null;
+  const all = trip.days.flatMap((d, di) =>
+    d.items.map((it) => ({ it, di, title: itemTitle(it) })),
+  );
+  const exact = all.find((x) => x.title === q);
+  if (exact) return exact;
+  const hits = all.filter((x) => nameMatches(x.title, q));
+  if (hits.length === 1) return hits[0]!;
+  if (hits.length > 1) {
+    hits.sort((a, b) => a.title.length - b.title.length);
+    return hits[0]!;
+  }
+  return null;
+}
+
+/** 无 LLM 时：常见中文指令启发式 */
+export function heuristicAdjustOps(instruction: string, trip: TripSnap): AdjustOp[] {
+  const text = instruction.trim();
+  const ops: AdjustOp[] = [];
+
+  const move =
+    /(?:把|将)?\s*[《「]?(.+?)[》」]?\s*(?:改到|调到|移到|放到|挪到)\s*第?\s*(\d+)\s*天/.exec(text) ||
+    /(?:把|将)?\s*[《「]?(.+?)[》」]?\s*(?:改到|调到|移到|放到|挪到)\s*D\s*(\d+)/i.exec(text);
+  if (move) {
+    const hit = findItemByName(trip, move[1]!);
+    const dayIdx = Number(move[2]) - 1;
+    if (hit && dayIdx >= 0 && dayIdx < trip.days.length) {
+      ops.push({ op: "move", itemId: hit.it.id, toDayIndex: dayIdx });
+    }
+  }
+
+  const del =
+    /(?:删除|去掉|移除)\s*[《「]?(.+?)[》」]?\s*$/.exec(text) ||
+    /(?:把|将)\s*[《「]?(.+?)[》」]?\s*(?:删掉|删除|去掉)/.exec(text);
+  if (del) {
+    const hit = findItemByName(trip, del[1]!);
+    if (hit) ops.push({ op: "remove", itemId: hit.it.id });
+  }
+
+  const time =
+    /(?:把|将)?\s*[《「]?(.+?)[》」]?\s*(?:改|调)?到?\s*(\d{1,2})\s*[:：点]\s*(\d{2})/.exec(text) ||
+    /(?:把|将)?\s*[《「]?(.+?)[》」]?\s*(?:时间改?为|设为)\s*(\d{1,2})\s*[:：点]\s*(\d{2})/.exec(text);
+  if (time) {
+    const hit = findItemByName(trip, time[1]!);
+    if (hit) {
+      const hh = String(Math.min(23, Number(time[2]))).padStart(2, "0");
+      const mm = String(Math.min(59, Number(time[3]))).padStart(2, "0");
+      ops.push({ op: "setTime", itemId: hit.it.id, startTime: `${hh}:${mm}` });
+    }
+  }
+
+  return ops;
+}
+
+function describeOps(ops: AdjustOp[], trip: TripSnap): string {
+  const titleOf = (id: string) => {
+    for (const d of trip.days) {
+      const it = d.items.find((x) => x.id === id);
+      if (it) return itemTitle(it);
+    }
+    return "地点";
+  };
+  if (!ops.length) return "未识别到可执行的调整";
+  return ops
+    .map((op) => {
+      if (op.op === "move") return `将「${titleOf(op.itemId)}」移到第 ${op.toDayIndex + 1} 天`;
+      if (op.op === "remove") return `删除「${titleOf(op.itemId)}」`;
+      if (op.op === "setTime") return `将「${titleOf(op.itemId)}」时刻改为 ${op.startTime}`;
+      return `将「${titleOf(op.itemId)}」改名为「${op.name}」`;
+    })
+    .join("；");
+}
+
+export async function proposeAdjust(tripId: string, instruction: string) {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: tripFullInclude,
+  });
+  if (!trip) throw Object.assign(new Error("行程不存在"), { code: 40003 });
+
+  const snap: TripSnap = trip;
+  const catalog = trip.days.map((d, di) => ({
+    dayIndex: di,
+    dayId: d.id,
+    date: d.date.toISOString().slice(0, 10),
+    items: d.items.map((it, seq) => ({
+      itemId: it.id,
+      seq,
+      name: itemTitle(it),
+      startTime: it.startTime,
+    })),
+  }));
+
+  let ops: AdjustOp[] = [];
+  let source: "llm" | "rules" = "rules";
+
+  try {
+    const raw = await llm.chatJson(
+      `你是行程编辑助手。根据用户指令，对已有行程输出 JSON 操作，不要编造不存在的 itemId。
+只输出：{"summary":"一句话","ops":[...]}
+ops 仅允许：
+- {"op":"move","itemId":"...","toDayIndex":0,"toSeq":0}  // toDayIndex 从 0 起；toSeq 可选
+- {"op":"remove","itemId":"..."}
+- {"op":"setTime","itemId":"...","startTime":"HH:mm"}
+- {"op":"rename","itemId":"...","name":"..."}
+itemId 必须来自输入列表。无法理解则 ops 为空数组。`,
+      `行程：\n${JSON.stringify(catalog)}\n\n用户指令：${instruction}`,
+    );
+    const parsed = adjustOpsSchema.safeParse(raw);
+    if (parsed.success) {
+      ops = parsed.data.ops;
+      source = "llm";
+    }
+  } catch {
+    // fall through to rules
+  }
+
+  if (ops.length === 0) {
+    ops = heuristicAdjustOps(instruction, snap);
+    source = "rules";
+  }
+
+  // validate ids / day index
+  const itemIds = new Set(trip.days.flatMap((d) => d.items.map((i) => i.id)));
+  const dayCount = trip.days.length;
+  ops = ops.filter((op) => {
+    if (!itemIds.has(op.itemId)) return false;
+    if (op.op === "move" && (op.toDayIndex < 0 || op.toDayIndex >= dayCount)) return false;
+    return true;
+  });
+
+  const summary =
+    ops.length === 0
+      ? "没听懂或找不到对应地点，可试：「把熊猫基地改到第2天」"
+      : describeOps(ops, snap);
+
+  return { summary, ops, source };
+}
+
+export async function applyAdjust(tripId: string, ops: AdjustOp[]) {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: { days: { orderBy: { date: "asc" } } },
+  });
+  if (!trip) throw Object.assign(new Error("行程不存在"), { code: 40003 });
+  if (!ops.length) throw Object.assign(new Error("没有可应用的操作"), { code: 40001 });
+
+  const dayIds = trip.days.map((d) => d.id);
+  const itemIds = new Set(
+    (
+      await prisma.itineraryItem.findMany({
+        where: { dayId: { in: dayIds } },
+        select: { id: true },
+      })
+    ).map((x) => x.id),
+  );
+
+  for (const op of ops) {
+    if (!itemIds.has(op.itemId)) {
+      throw Object.assign(new Error("操作引用了不存在的地点"), { code: 40001 });
+    }
+    if (op.op === "move") {
+      const toDayId = dayIds[op.toDayIndex];
+      if (!toDayId) throw Object.assign(new Error("目标天无效"), { code: 40001 });
+      await moveItemToDay(op.itemId, toDayId, op.toSeq);
+    } else if (op.op === "remove") {
+      await removeItem(op.itemId);
+      itemIds.delete(op.itemId);
+    } else if (op.op === "setTime") {
+      await updateItem(op.itemId, { startTime: op.startTime });
+    } else if (op.op === "rename") {
+      await updateItem(op.itemId, { customName: op.name });
+    }
+  }
+
+  return prisma.trip.findUniqueOrThrow({
+    where: { id: tripId },
+    include: tripFullInclude,
   });
 }

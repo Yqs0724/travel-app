@@ -14,9 +14,46 @@ import {
 } from "@/api/planner";
 import { isErr } from "@/api/client";
 import { Button } from "@/components/Button";
+import { DateField, TimeField } from "@/components/DateTimeFields";
 import { Sheet } from "@/components/Sheet";
 
 const MODES = Object.keys(MODE_LABELS) as TransportMode[];
+
+function addDaysISO(isoDate: string, delta: number): string {
+  const y = Number(isoDate.slice(0, 4));
+  const m = Number(isoDate.slice(5, 7));
+  const d = Number(isoDate.slice(8, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d + delta));
+  return dt.toISOString().slice(0, 10);
+}
+
+function daysBetween(fromISO: string, toISO: string): number {
+  const a = Date.UTC(
+    Number(fromISO.slice(0, 4)),
+    Number(fromISO.slice(5, 7)) - 1,
+    Number(fromISO.slice(8, 10)),
+  );
+  const b = Date.UTC(
+    Number(toISO.slice(0, 4)),
+    Number(toISO.slice(5, 7)) - 1,
+    Number(toISO.slice(8, 10)),
+  );
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+/** 已有准确时刻优先；否则用「提前 N 天」+ 默认 18:00 */
+function resolveRemindFields(
+  dayDate: string,
+  bookRemindAt: string | null | undefined,
+  bookAheadDays: number | null | undefined,
+): { date: string; time: string } {
+  if (bookRemindAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(bookRemindAt)) {
+    return { date: bookRemindAt.slice(0, 10), time: bookRemindAt.slice(11, 16) };
+  }
+  const visit = dayDate.slice(0, 10);
+  const ahead = bookAheadDays ?? 1;
+  return { date: addDaysISO(visit, -ahead), time: "18:00" };
+}
 
 export function ItemEditSheet({
   day,
@@ -39,10 +76,10 @@ export function ItemEditSheet({
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [duration, setDuration] = useState(String(item.durationMin ?? 60));
-  const [startTime, setStartTime] = useState(item.startTime ?? "");
   const [needBook, setNeedBook] = useState(item.needBook);
-  const [bookAhead, setBookAhead] = useState(String(item.bookAheadDays ?? 3));
+  const initialRemind = resolveRemindFields(day.date, item.bookRemindAt, item.bookAheadDays);
+  const [bookDate, setBookDate] = useState(initialRemind.date);
+  const [bookTime, setBookTime] = useState(initialRemind.time);
   const [bookUrl, setBookUrl] = useState(item.bookUrl ?? "");
   const [ticket, setTicket] = useState(
     item.ticketPrice != null && item.ticketPrice > 0 ? String(item.ticketPrice) : "",
@@ -74,10 +111,9 @@ export function ItemEditSheet({
       await updateItem(
         item.id,
         {
-          durationMin: duration ? Number(duration) : null,
-          startTime: startTime || null,
           needBook,
-          bookAheadDays: needBook ? (bookAhead ? Number(bookAhead) : 0) : null,
+          bookRemindAt: needBook && bookDate ? `${bookDate}T${(bookTime || "18:00").slice(0, 5)}` : null,
+          bookAheadDays: needBook ? daysBetween(bookDate || day.date.slice(0, 10), day.date.slice(0, 10)) : null,
           bookUrl: needBook ? bookUrl.trim() || null : null,
           ticketPrice: ticket.trim() === "" ? null : Number(ticket),
         },
@@ -122,7 +158,6 @@ export function ItemEditSheet({
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="truncate text-base font-semibold">{itemTitle(item)}</p>
-            <p className="text-xs text-ink-muted tabular-nums">{item.startTime ?? "—"}</p>
           </div>
           <button type="button" className="h-11 w-11 text-lg text-ink-muted" onClick={onClose} aria-label="关闭">
             ×
@@ -133,38 +168,17 @@ export function ItemEditSheet({
 
         <form onSubmit={(e) => void onSave(e)} className="space-y-3">
           <label className="block text-xs text-ink-muted">
-            <span className="mb-1 block text-center font-medium text-accent-dark">出发时刻</span>
+            <span className="mb-1 block text-center">门票（元）</span>
             <input
-              type="time"
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="可选"
               className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
+              value={ticket}
+              onChange={(e) => setTicket(e.target.value)}
             />
           </label>
-          <div className="flex gap-2">
-            <label className="min-w-0 flex-1 text-xs text-ink-muted">
-              <span className="mb-1 block text-center">停留（分）</span>
-              <input
-                type="number"
-                min={0}
-                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-              />
-            </label>
-            <label className="min-w-0 flex-1 text-xs text-ink-muted">
-              <span className="mb-1 block text-center">门票（元）</span>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="可选"
-                className="h-11 w-full rounded-btn bg-surface-2 px-3 text-center text-sm tabular-nums outline-none"
-                value={ticket}
-                onChange={(e) => setTicket(e.target.value)}
-              />
-            </label>
-          </div>
           <p className="text-center text-xs text-ink-muted">门票为参考估价，不进账单</p>
 
           {tripId ? (
@@ -207,20 +221,18 @@ export function ItemEditSheet({
           {needBook && (
             <div className="space-y-2 rounded-btn bg-surface-2/80 p-3">
               <label className="block text-xs text-ink-muted">
-                提前几天提醒
-                <input
-                  type="number"
-                  min={0}
-                  className="mt-1 h-11 w-full rounded-btn bg-bg px-3 text-sm outline-none"
-                  value={bookAhead}
-                  onChange={(e) => setBookAhead(e.target.value)}
-                />
+                提醒日期
+                <DateField value={bookDate} onChange={setBookDate} />
               </label>
               <label className="block text-xs text-ink-muted">
-                预约链接（可选）
+                提醒时刻
+                <TimeField value={bookTime} onChange={setBookTime} />
+              </label>
+              <label className="block text-xs text-ink-muted">
+                预约方式（可选）
                 <input
-                  type="url"
-                  placeholder="https://"
+                  type="text"
+                  placeholder="公众号 / 链接 / 电话…"
                   className="mt-1 h-11 w-full rounded-btn bg-bg px-3 text-sm outline-none"
                   value={bookUrl}
                   onChange={(e) => setBookUrl(e.target.value)}

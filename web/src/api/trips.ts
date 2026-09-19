@@ -13,13 +13,14 @@ export type TripSummary = {
 };
 
 export type TripDetail = TripSummary & {
+  editVersion: number;
   days: TripDay[];
 };
 
-export function login(password: string) {
+export function login() {
   return api<{ token: string }>("/api/v1/auth/login", {
     method: "POST",
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({}),
   });
 }
 
@@ -78,4 +79,44 @@ export function parseMembers(json: string): string[] {
     /* ignore */
   }
   return [];
+}
+
+export type PendingPlace = {
+  id: string;
+  name: string;
+  startTime?: string | null;
+  dayLabel?: string | null;
+  amapId?: string | null;
+  lng?: number | null;
+  lat?: number | null;
+  category?: string | null;
+};
+
+export function getPending(tripId: string) {
+  return api<PendingPlace[]>(`/api/v1/trips/${tripId}/pending`);
+}
+
+export function setPending(tripId: string, places: PendingPlace[]) {
+  return api<PendingPlace[]>(`/api/v1/trips/${tripId}/pending`, {
+    method: "PUT",
+    body: JSON.stringify({ places }),
+  });
+}
+
+export function appendPending(
+  tripId: string,
+  places: Array<{
+    name: string;
+    startTime?: string | null;
+    dayLabel?: string | null;
+    amapId?: string | null;
+    lng?: number | null;
+    lat?: number | null;
+    category?: string | null;
+  }>,
+) {
+  return api<PendingPlace[]>(`/api/v1/trips/${tripId}/pending`, {
+    method: "POST",
+    body: JSON.stringify({ places }),
+  });
 }

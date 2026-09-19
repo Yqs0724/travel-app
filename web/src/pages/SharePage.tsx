@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { clearEditToken, isErr, setEditToken } from "@/api/client";
-import { itemTitle, type ItineraryItem, type TripDay } from "@/api/planner";
+import { clearDayItems, itemTitle, legLabel, type ItineraryItem, type TripDay } from "@/api/planner";
 import { getShare, unlockShare, type AaShareSnapshot, type ShareTrip } from "@/api/share";
 import { parseMembers } from "@/api/trips";
 import { Sheet } from "@/components/Sheet";
@@ -11,6 +11,9 @@ import { ExpensePanel } from "@/features/budget/ExpensePanel";
 import { AddPlaceForm } from "@/features/planner/AddPlaceForm";
 import { ItemEditSheet } from "@/features/planner/ItemEditSheet";
 import { MapView } from "@/features/planner/MapView";
+import { useTripLive } from "@/hooks/useTripLive";
+
+const NAME_KEY = "triptrace_collab_name";
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -35,10 +38,10 @@ export function SharePage() {
   const [canEditLink, setCanEditLink] = useState(false);
   const [editVersion, setEditVersion] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [editToken, setEditTokenState] = useState<string | null>(null);
   const [members, setMembers] = useState<string[]>([]);
   const [tab, setTab] = useState<ShareTab>("plan");
-  const [pwd, setPwd] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
@@ -49,6 +52,11 @@ export function SharePage() {
   const [dragH, setDragH] = useState<number | null>(null);
   const dragRef = useRef<{ y: number; h: number } | null>(null);
   const dotRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const daySwipe = useRef<{ x: number; y: number } | null>(null);
+  const [liveName, setLiveName] = useState(
+    () => sessionStorage.getItem(NAME_KEY)?.trim() || "协作者",
+  );
+  const [syncHint, setSyncHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -67,17 +75,39 @@ export function SharePage() {
     });
   }, [token]);
 
+  const reloadShare = useCallback(async () => {
+    if (!token) return;
+    const res = await getShare(token);
+    if (isErr(res) || res.data.kind === "aa") return;
+    setTrip(res.data.trip);
+    setEditVersion(res.data.editVersion);
+  }, [token]);
+
+  const live = useTripLive({
+    tripId: trip?.id,
+    sinceVersion: editVersion,
+    name: liveName,
+    token: editToken,
+    enabled: editing && !!editToken && !!trip?.id,
+    onRemoteChange: (v) => {
+      void reloadShare().then(() => {
+        setSyncHint(`已同步他人修改（v${v}）`);
+        window.setTimeout(() => setSyncHint(null), 2500);
+      });
+    },
+  });
+
   useEffect(() => {
-    dotRefs.current[dayIndex]?.scrollIntoView({
-      inline: "center",
-      block: "nearest",
-      behavior: "smooth",
-    });
+    const el = dotRefs.current[dayIndex];
+    const scroller = el?.closest("[data-day-dots]");
+    if (!el || !(scroller instanceof HTMLElement)) return;
+    const left = el.offsetLeft - (scroller.clientWidth - el.offsetWidth) / 2;
+    scroller.scrollTo({ left: Math.max(0, left) });
   }, [dayIndex]);
 
   const day = useMemo(() => {
     if (!trip?.days.length) return null;
-    const i = Math.min(dayIndex, trip.days.length - 1);
+    const i = Math.min(Math.max(dayIndex, 0), trip.days.length - 1);
     return trip.days[i] ?? null;
   }, [trip, dayIndex]);
 
@@ -94,20 +124,42 @@ export function SharePage() {
     });
   }, []);
 
+  async function onClearDay() {
+    if (!editing || !day || day.items.length === 0 || clearing) return;
+    if (!confirm(`清空今天的 ${day.items.length} 个地点？不可恢复`)) return;
+    setClearing(true);
+    setError(null);
+    const res = await clearDayItems(day.id, writeOpts);
+    setClearing(false);
+    if (isErr(res)) {
+      setError(res.message || "清空失败");
+      return;
+    }
+    onDayChange(res.data);
+    setSheet(null);
+    setFocusId(null);
+  }
+
   const openItem = useCallback((item: ItineraryItem, index: number) => {
     setSheet({ item, index });
     setFocusId(item.id);
   }, []);
 
-  async function onUnlock(e: React.FormEvent) {
-    e.preventDefault();
+  async function onUnlock() {
     if (!token) return;
     setUnlockError(null);
-    const res = await unlockShare(token, pwd);
+    const res = await unlockShare(token);
     if (isErr(res)) {
       setUnlockError(res.message);
       return;
     }
+    let name = sessionStorage.getItem(NAME_KEY)?.trim();
+    if (!name) {
+      const typed = window.prompt("怎么称呼你？（给其他人看）", "朋友");
+      name = typed?.trim() || "协作者";
+      sessionStorage.setItem(NAME_KEY, name);
+    }
+    setLiveName(name);
     setEditToken(res.data.token);
     setEditTokenState(res.data.token);
     setEditVersion(res.data.editVersion);
@@ -115,7 +167,6 @@ export function SharePage() {
     setTrip(res.data.trip);
     setEditing(true);
     setTab("plan");
-    setPwd("");
   }
 
   function onLock() {
@@ -172,8 +223,39 @@ export function SharePage() {
 
   const dayDate = day ? dayMeta(day.date, dayIndex) : null;
 
+  function goDay(i: number) {
+    setDayIndex(i);
+    setSheet(null);
+    setFocusId(null);
+    setAddOpen(false);
+  }
+
+  function onDaySwipeDown(e: React.PointerEvent) {
+    if (tab === "budget") return;
+    if ((e.target as HTMLElement).closest("input,textarea,select,[data-map]")) return;
+    daySwipe.current = { x: e.clientX, y: e.clientY };
+  }
+
+  function onDaySwipeEnd(e: React.PointerEvent) {
+    const start = daySwipe.current;
+    daySwipe.current = null;
+    if (!start || !trip) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
+    // 右滑下一天，左滑上一天
+    const next = dayIndex + (dx > 0 ? 1 : -1);
+    if (next < 0 || next >= trip.days.length) return;
+    goDay(next);
+  }
+
   return (
-    <div className="mx-auto flex h-dvh max-w-[480px] flex-col overflow-hidden bg-bg">
+    <div
+      className="mx-auto flex h-dvh max-w-[480px] touch-pan-y flex-col overflow-hidden bg-bg"
+      onPointerDownCapture={onDaySwipeDown}
+      onPointerUpCapture={onDaySwipeEnd}
+      onPointerCancelCapture={onDaySwipeEnd}
+    >
       <header className="shrink-0 border-b border-line px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs text-ink-muted">{editing ? "行迹 · 协作编辑中" : "行迹 · 只读"}</p>
@@ -185,22 +267,14 @@ export function SharePage() {
         </div>
         <h1 className="truncate text-base font-semibold">{trip.title}</h1>
         {canEditLink && !editing && (
-          <form onSubmit={(e) => void onUnlock(e)} className="mt-2 flex gap-2">
-            <input
-              type="password"
-              placeholder="编辑密码"
-              className="h-10 min-w-0 flex-1 rounded-full bg-surface-2 px-3 text-sm outline-none"
-              value={pwd}
-              onChange={(e) => setPwd(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-accent px-4 text-sm text-accent-dark"
-            >
-              <IconUnlock size={16} />
-              解锁编辑
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={() => void onUnlock()}
+            className="mt-2 flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-accent text-sm text-accent-dark"
+          >
+            <IconUnlock size={16} />
+            进入编辑
+          </button>
         )}
         {unlockError && <p className="mt-1 text-xs text-danger">{unlockError}</p>}
         {editing && (
@@ -227,6 +301,15 @@ export function SharePage() {
         )}
       </header>
 
+      {live.others.length > 0 && (
+        <p className="shrink-0 border-b border-line bg-accent/15 px-4 py-1.5 text-center text-[11px] text-accent-dark">
+          {live.others.map((p) => p.name).join("、")} 也在编辑
+        </p>
+      )}
+      {syncHint && (
+        <p className="shrink-0 px-4 py-1 text-center text-[11px] text-ok">{syncHint}</p>
+      )}
+
       {editing && tab === "budget" && budgetOpts ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ExpensePanel
@@ -240,7 +323,10 @@ export function SharePage() {
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="shrink-0 px-4 pb-2 pt-3">
             <p className="text-center text-sm font-semibold tabular-nums">{dayDate?.title}</p>
-            <div className="mt-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+              className="mt-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-day-dots
+            >
               <div className="mx-auto flex w-max justify-center gap-0.5">
                 {trip.days.map((d, i) => {
                   const meta = dayMeta(d.date, i);
@@ -254,12 +340,7 @@ export function SharePage() {
                       type="button"
                       aria-label={meta.title}
                       aria-current={active ? "true" : undefined}
-                      onClick={() => {
-                        setDayIndex(i);
-                        setSheet(null);
-                        setFocusId(null);
-                        setAddOpen(false);
-                      }}
+                      onClick={() => goDay(i)}
                       className="flex shrink-0 items-center justify-center p-2"
                     >
                       <span
@@ -307,10 +388,24 @@ export function SharePage() {
               aria-label="拖动调整目录高度"
             >
               <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-line" />
-              <p className="text-center text-sm font-semibold">
+              <p className="relative text-center text-sm font-semibold">
                 今日 · {dayDate?.short ?? ""} · {items.length} 站
                 {noCoordCount > 0 && (
                   <span className="ml-1 text-xs font-normal text-warn">（{noCoordCount} 站无坐标）</span>
+                )}
+                {editing && items.length > 0 && (
+                  <button
+                    type="button"
+                    className="absolute right-0 top-0 text-xs font-normal text-danger disabled:opacity-50"
+                    disabled={clearing}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void onClearDay();
+                    }}
+                  >
+                    {clearing ? "清空中…" : "清空"}
+                  </button>
                 )}
               </p>
             </div>
@@ -319,7 +414,7 @@ export function SharePage() {
               {items.length === 0 ? (
                 <p className="py-4 text-center text-sm text-ink-muted">这一天还没有安排</p>
               ) : (
-                <ul className="divide-y divide-line">
+                <ul>
                   {items.map((item, index) => {
                     const active = focusId === item.id;
                     return (
@@ -327,16 +422,13 @@ export function SharePage() {
                         <button
                           type="button"
                           aria-current={active ? "true" : undefined}
-                          className={`flex w-full items-baseline gap-3 rounded-btn px-2 py-3 text-left ${
+                          className={`flex w-full items-center gap-3 rounded-btn px-2 py-3 text-left ${
                             active ? "bg-accent/25" : ""
                           }`}
                           onClick={() => openItem(item, index)}
                         >
                           <span className="w-6 shrink-0 text-xs font-semibold tabular-nums text-accent-dark">
                             {index + 1}
-                          </span>
-                          <span className="w-12 shrink-0 text-[13px] tabular-nums text-ink-muted">
-                            {item.startTime ?? "—"}
                           </span>
                           <span
                             className={`min-w-0 flex-1 truncate text-[15px] ${
@@ -346,6 +438,9 @@ export function SharePage() {
                             {itemTitle(item)}
                           </span>
                         </button>
+                        {index < items.length - 1 && item.legToNext && (
+                          <p className="pb-1 pl-11 text-[11px] text-ink-muted">{legLabel(item.legToNext)}</p>
+                        )}
                       </li>
                     );
                   })}
@@ -396,10 +491,9 @@ export function SharePage() {
         <Sheet open onClose={() => setSheet(null)} aria-label="地点详情">
           <p className="text-xs text-ink-muted">第 {sheet.index + 1} 站</p>
           <p className="text-lg font-semibold">{itemTitle(sheet.item)}</p>
-          <p className="text-sm text-ink-muted">
-            {sheet.item.startTime ?? "时刻未定"}
-            {sheet.item.durationMin != null ? ` · 停留 ${sheet.item.durationMin} 分` : ""}
-          </p>
+          {sheet.item.legToNext && (
+            <p className="text-sm text-ink-muted">前往下一站 · {legLabel(sheet.item.legToNext)}</p>
+          )}
           {sheet.item.note && <p className="text-sm">{sheet.item.note}</p>}
           <button
             type="button"

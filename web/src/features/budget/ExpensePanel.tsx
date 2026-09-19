@@ -118,6 +118,7 @@ export function ExpensePanel({
       category,
       amount: n,
       note: shop,
+      payer: "我",
       splits: buildSplits(),
     };
     setBusy(true);

@@ -20,6 +20,7 @@ function editorAllowed(path: string, tripId: string, method: string): boolean {
   if (path === `/api/v1/trips/${tripId}`) {
     return method === "GET" || method === "PATCH";
   }
+  if (path === `/api/v1/trips/${tripId}/live`) return method === "POST";
   return false;
 }
 

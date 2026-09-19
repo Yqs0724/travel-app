@@ -7,6 +7,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { NearbyPage } from "@/pages/NearbyPage";
 import { PlanPage } from "@/pages/PlanPage";
 import { RequireAuth } from "@/pages/RequireAuth";
+import { ReviewPage } from "@/pages/ReviewPage";
 import { SharePage } from "@/pages/SharePage";
 import { HomeRedirect, TripLayout } from "@/pages/TripLayout";
 
@@ -27,6 +28,7 @@ export function App() {
               <Route path="map" element={<Navigate to="../plan" replace />} />
               <Route path="checklist" element={<ChecklistPage />} />
               <Route path="budget" element={<BudgetPage />} />
+              <Route path="review" element={<ReviewPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/trips" replace />} />

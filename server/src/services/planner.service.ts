@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import * as amap from "../providers/amap.js";
 import * as budget from "./budget.service.js";
+import { touchVersion } from "./live.service.js";
 
 export const dayInclude = {
   items: {
@@ -37,16 +38,29 @@ export async function tripIdForItem(itemId: string) {
   return item?.day.tripId ?? null;
 }
 
-/** 弱协作：expectedVersion 命中才 +1；未传则跳过（主人账号） */
+/** 任意写操作 +1；传 expectedVersion 时做乐观锁（协作/多人在线） */
 export async function bumpEditVersion(tripId: string, expectedVersion?: number) {
-  if (expectedVersion == null) return;
-  const r = await prisma.trip.updateMany({
-    where: { id: tripId, editVersion: expectedVersion },
-    data: { editVersion: { increment: 1 } },
-  });
-  if (r.count === 0) {
-    throw Object.assign(new Error("行程已被他人更新，请刷新后重试"), { code: 40901 });
+  if (expectedVersion != null) {
+    const r = await prisma.trip.updateMany({
+      where: { id: tripId, editVersion: expectedVersion },
+      data: { editVersion: { increment: 1 } },
+    });
+    if (r.count === 0) {
+      throw Object.assign(new Error("行程已被他人更新，请刷新后重试"), { code: 40901 });
+    }
+  } else {
+    await prisma.trip.update({
+      where: { id: tripId },
+      data: { editVersion: { increment: 1 } },
+    });
   }
+  const t = await prisma.trip.findUnique({
+    where: { id: tripId },
+    select: { editVersion: true },
+  });
+  const v = t?.editVersion ?? 0;
+  touchVersion(tripId, v);
+  return v;
 }
 
 export async function attachEditVersion<T extends { tripId?: string | null }>(day: T) {
@@ -189,6 +203,7 @@ export type AddItemInput = {
   ticketPrice?: number;
   needBook?: boolean;
   bookAheadDays?: number;
+  bookRemindAt?: string;
   bookUrl?: string;
   note?: string;
   modeToNext?: string;
@@ -255,6 +270,7 @@ export async function addItem(dayId: string, input: AddItemInput) {
       ticketPrice: input.ticketPrice,
       needBook: input.needBook ?? false,
       bookAheadDays: input.bookAheadDays,
+      bookRemindAt: input.bookRemindAt || null,
       bookUrl: input.bookUrl,
       note: input.note,
     },
@@ -271,6 +287,7 @@ export type UpdateItemInput = {
   ticketPrice?: number | null;
   needBook?: boolean;
   bookAheadDays?: number | null;
+  bookRemindAt?: string | null;
   bookUrl?: string | null;
   note?: string | null;
 };
@@ -288,6 +305,7 @@ export async function updateItem(itemId: string, input: UpdateItemInput) {
       ticketPrice: input.ticketPrice,
       needBook: input.needBook,
       bookAheadDays: input.bookAheadDays,
+      bookRemindAt: input.bookRemindAt,
       bookUrl: input.bookUrl,
       note: input.note,
     },
@@ -318,6 +336,102 @@ export async function removeItem(itemId: string) {
   }
 
   return recomputeDay(dayId);
+}
+
+/** 清空当天全部地点（路段随地点级联删除） */
+export async function clearDayItems(dayId: string) {
+  const day = await prisma.tripDay.findUnique({ where: { id: dayId }, select: { id: true } });
+  if (!day) throw Object.assign(new Error("日程不存在"), { code: 40003 });
+
+  const items = await prisma.itineraryItem.findMany({
+    where: { dayId },
+    select: { id: true },
+  });
+  const ids = items.map((i) => i.id);
+  if (ids.length) {
+    await prisma.expense.deleteMany({ where: { itemId: { in: ids } } });
+    await prisma.itineraryItem.deleteMany({ where: { dayId } });
+  }
+  return getDay(dayId);
+}
+
+/** 跨天移动：改 dayId + seq，两端日程都重算 */
+export async function moveItemToDay(itemId: string, toDayId: string, toSeq?: number) {
+  const item = await prisma.itineraryItem.findUnique({ where: { id: itemId } });
+  if (!item) throw Object.assign(new Error("行程条目不存在"), { code: 40003 });
+
+  const toDay = await prisma.tripDay.findUnique({ where: { id: toDayId } });
+  if (!toDay) throw Object.assign(new Error("目标日程不存在"), { code: 40003 });
+
+  const fromDay = await prisma.tripDay.findUnique({ where: { id: item.dayId } });
+  if (!fromDay || fromDay.tripId !== toDay.tripId) {
+    throw Object.assign(new Error("不能跨行程移动"), { code: 40001 });
+  }
+
+  const fromDayId = item.dayId;
+  if (fromDayId === toDayId) {
+    const ordered = await prisma.itineraryItem.findMany({
+      where: { dayId: toDayId },
+      orderBy: { seq: "asc" },
+    });
+    const ids = ordered.map((x) => x.id);
+    const from = ids.indexOf(itemId);
+    if (from < 0) throw Object.assign(new Error("条目不在当日"), { code: 40001 });
+    ids.splice(from, 1);
+    const insertAt =
+      toSeq == null ? ids.length : Math.max(0, Math.min(toSeq, ids.length));
+    ids.splice(insertAt, 0, itemId);
+    return reorderItems(toDayId, ids);
+  }
+
+  // detach from source
+  await prisma.transportLeg.deleteMany({ where: { fromItemId: itemId } });
+  const prevOnFrom = await prisma.itineraryItem.findFirst({
+    where: { dayId: fromDayId, seq: item.seq - 1 },
+  });
+  if (prevOnFrom) {
+    await prisma.transportLeg.deleteMany({ where: { fromItemId: prevOnFrom.id } });
+  }
+
+  const destCount = await prisma.itineraryItem.count({ where: { dayId: toDayId } });
+  const insertAt =
+    toSeq == null ? destCount : Math.max(0, Math.min(toSeq, destCount));
+
+  // bump seq on destination
+  const destItems = await prisma.itineraryItem.findMany({
+    where: { dayId: toDayId },
+    orderBy: { seq: "desc" },
+  });
+  for (const d of destItems) {
+    if (d.seq >= insertAt) {
+      await prisma.itineraryItem.update({
+        where: { id: d.id },
+        data: { seq: d.seq + 1 },
+      });
+    }
+  }
+
+  await prisma.itineraryItem.update({
+    where: { id: itemId },
+    data: { dayId: toDayId, seq: insertAt },
+  });
+
+  // compact source seq
+  const rest = await prisma.itineraryItem.findMany({
+    where: { dayId: fromDayId },
+    orderBy: { seq: "asc" },
+  });
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i]!.seq !== i) {
+      await prisma.itineraryItem.update({
+        where: { id: rest[i]!.id },
+        data: { seq: i },
+      });
+    }
+  }
+
+  await recomputeDay(fromDayId);
+  return recomputeDay(toDayId);
 }
 
 export async function reorderItems(dayId: string, orderedIds: string[]) {

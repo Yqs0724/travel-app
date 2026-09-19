@@ -19,6 +19,8 @@ model Trip {
   expenses    Expense[]
   checklist   ChecklistItem[]
   shareLinks  ShareLink[]
+  /** AI 草稿待定参考 JSON：[{id,name,startTime?,dayLabel?,...}]，不入行程 */
+  pendingJson String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 }
@@ -46,6 +48,9 @@ model ItineraryItem {
   ticketPrice   Float?
   needBook      Boolean        @default(false)
   bookAheadDays Int?
+  /** 提醒时刻 YYYY-MM-DDTHH:mm；有则优先于 bookAheadDays */
+  bookRemindAt  String?
+  /** 预约方式备注：链接 / 公众号 / 电话等，自由文本 */
   bookUrl       String?
   note          String?
   day           TripDay        @relation(fields: [dayId], references: [id], onDelete: Cascade)
@@ -114,7 +119,7 @@ model ShareLink {
   canEdit      Boolean   @default(false)
   /** trip=行程只读；aa=仅共同支出账单 */
   kind         String    @default("trip")
-  passwordHash String? // canEdit 时必填：salt:hex
+  passwordHash String? // 历史字段；协作已无密码
   expiresAt    DateTime?
   trip         Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }

@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useRef, useState } from "react";
+﻿import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   createTrip,
@@ -12,11 +12,13 @@ import {
 } from "@/api/trips";
 import { createAaShare, createEditShare, createShare, getShare, listShares, revokeShare, type AaShareSnapshot, type ShareLinkRow } from "@/api/share";
 import { isErr } from "@/api/client";
+import type { WriteOpts } from "@/api/planner";
 import { Button } from "@/components/Button";
 import {
   IconEdit,
   IconKey,
   IconLogout,
+  IconReview,
   IconShare,
   IconTrash,
   IconWallet,
@@ -25,6 +27,7 @@ import { MembersEditor } from "@/components/MembersEditor";
 import { Sheet } from "@/components/Sheet";
 import { TripTabBar } from "@/components/TripTabBar";
 import { aaExportFilename, downloadAaHtml, exportAaBundle, filterAaSnap, friendsOnAa, printAaHtml } from "@/features/budget/aaExport";
+import { useTripLive } from "@/hooks/useTripLive";
 import { useAuthStore } from "@/stores/auth";
 
 function fmtRange(start: string, end: string) {
@@ -174,6 +177,30 @@ export function TripLayout() {
     setTrip(res.data);
     setError(null);
   }
+
+  const onRemoteChange = useCallback(
+    (v: number) => {
+      if (!id) return;
+      void reloadTrip(id).then(() => {
+        setShareHint(`行程已同步（v${v}）`);
+        window.setTimeout(() => setShareHint(null), 2500);
+      });
+    },
+    [id],
+  );
+
+  const live = useTripLive({
+    tripId: id,
+    sinceVersion: trip?.editVersion ?? 0,
+    name: "主人",
+    enabled: !!id && !!trip,
+    onRemoteChange,
+  });
+
+  const writeOpts: WriteOpts | undefined = useMemo(
+    () => (trip ? { expectedVersion: trip.editVersion } : undefined),
+    [trip],
+  );
 
   async function reloadList() {
     const res = await listTrips();
@@ -391,14 +418,8 @@ export function TripLayout() {
   async function onCollabShare() {
     if (!id) return;
     setMenuOpen(false);
-    const password = window.prompt("设置协作编辑密码（至少 4 位）");
-    if (!password) return;
-    if (password.length < 4) {
-      setError("编辑密码至少 4 位");
-      return;
-    }
     setShareHint(null);
-    const res = await createEditShare(id, password);
+    const res = await createEditShare(id);
     if (isErr(res)) {
       setError(res.message);
       return;
@@ -406,7 +427,7 @@ export function TripLayout() {
     const url = `${window.location.origin}${res.data.path}`;
     try {
       await navigator.clipboard.writeText(url);
-      setShareHint("协作链接已复制（把密码私下发给朋友）");
+      setShareHint("协作链接已复制");
     } catch {
       setShareHint(url);
     }
@@ -445,6 +466,17 @@ export function TripLayout() {
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-11 z-30 min-w-[168px] overflow-hidden rounded-btn border border-line bg-bg shadow-warm">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm"
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (id) navigate(`/trips/${id}/review`);
+                }}
+              >
+                <IconReview size={18} className="text-accent-dark" />
+                旅行回顾
+              </button>
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm"
@@ -519,6 +551,11 @@ export function TripLayout() {
       </header>
 
       {error && <p className="px-4 pt-3 text-sm text-danger">{error}</p>}
+      {live.others.length > 0 && (
+        <p className="border-b border-line bg-accent/15 px-4 py-1.5 text-center text-[11px] text-accent-dark">
+          {live.others.map((p) => p.name).join("、")} 也在编辑
+        </p>
+      )}
       {shareHint && (
         <p
           className={`px-4 pt-2 text-sm break-all ${
@@ -528,7 +565,7 @@ export function TripLayout() {
           {shareHint}
         </p>
       )}
-      <Outlet context={{ trip, setTrip }} />
+      <Outlet context={{ trip, setTrip, writeOpts }} />
       <TripTabBar tripId={id} />
 
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} aria-label="切换行程">

@@ -1,4 +1,4 @@
-import { heuristicNames, heuristicRestaurantNames } from "./ai.service.js";
+import { assignPoisToDays, heuristicNames, heuristicRestaurantNames } from "./ai.service.js";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -23,4 +23,31 @@ assert(r.some((x) => x.includes("马路边边") || x.includes("火锅")), "dianp
 assert(r.some((x) => x.includes("蜀大侠")), "suffix shop");
 assert(!r.includes("三星堆博物馆"), "skip scenic");
 
-console.log("ai heuristic selfcheck ok", { a, b, c, d, r });
+const note =
+  "咱们就4号：成都博物馆、三星堆（需要讲解）；5号:都江堰、青城山；6号:武侯祠（需要讲解）、杜甫草堂（可以当天只去武侯祠） 然后从成都东坐动车到黄山九寨";
+const dates = ["2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"];
+const named = (name: string) => ({ name });
+const buckets = assignPoisToDays(
+  [
+    named("成都东站"),
+    named("黄山风景区"),
+    named("成都武侯祠博物馆"),
+    named("成都博物馆"),
+    named("青城山景区"),
+    named("成都杜甫草堂博物馆"),
+    named("都江堰景区"),
+    named("三星堆博物馆"),
+  ],
+  dates,
+  note,
+);
+assert(buckets, "dated note should not fall back to geo cluster");
+const namesOn = (i: number) => buckets![i]!.map((p) => p.name);
+assert(namesOn(0).length === 0, `10-03 empty, got ${namesOn(0)}`);
+assert(namesOn(1).join(",") === "成都博物馆,三星堆博物馆", `10-04 ${namesOn(1)}`);
+assert(namesOn(2).join(",") === "都江堰景区,青城山景区", `10-05 ${namesOn(2)}`);
+assert(namesOn(3).join(",") === "成都武侯祠博物馆,成都杜甫草堂博物馆", `10-06 ${namesOn(3)}`);
+assert(namesOn(4).includes("成都东站") && namesOn(4).includes("黄山风景区"), `10-07 ${namesOn(4)}`);
+assert(assignPoisToDays([named("锦里")], dates, "随便逛锦里") === null, "no day marker");
+
+console.log("ai heuristic selfcheck ok", { a, b, c, d, r, days: namesOn(1) });

@@ -51,10 +51,11 @@ export function planItinerary(
     city?: string;
     category?: string;
   }>,
+  sourceText?: string,
 ) {
   return api<DraftDay[]>("/api/v1/ai/plan", {
     method: "POST",
-    body: JSON.stringify({ tripId, pois }),
+    body: JSON.stringify({ tripId, pois, sourceText }),
   });
 }
 
@@ -62,5 +63,25 @@ export function commitPlan(tripId: string, days: DraftDay[]) {
   return api<TripDetail>("/api/v1/ai/commit", {
     method: "POST",
     body: JSON.stringify({ tripId, days }),
+  });
+}
+
+export type AdjustOp =
+  | { op: "move"; itemId: string; toDayIndex: number; toSeq?: number }
+  | { op: "remove"; itemId: string }
+  | { op: "setTime"; itemId: string; startTime: string }
+  | { op: "rename"; itemId: string; name: string };
+
+export function proposeAdjust(tripId: string, instruction: string) {
+  return api<{ summary: string; ops: AdjustOp[]; source: "llm" | "rules" }>("/api/v1/ai/adjust", {
+    method: "POST",
+    body: JSON.stringify({ tripId, instruction }),
+  });
+}
+
+export function applyAdjust(tripId: string, ops: AdjustOp[]) {
+  return api<TripDetail>("/api/v1/ai/adjust/apply", {
+    method: "POST",
+    body: JSON.stringify({ tripId, ops }),
   });
 }

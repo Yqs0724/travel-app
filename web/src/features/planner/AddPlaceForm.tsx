@@ -100,7 +100,7 @@ export function AddPlaceForm({
         </p>
       )}
       {hits.length > 0 && (
-        <ul className="max-h-40 overflow-y-auto rounded-btn border border-line">
+        <ul className="max-h-40 overflow-y-auto rounded-btn border border-line scroll-warm">
           {hits.map((h) => (
             <li key={h.amapId}>
               <button
