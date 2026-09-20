@@ -437,11 +437,12 @@ export function TripLayout() {
   if (!id) return null;
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[480px] pb-20">
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-line bg-bg px-2 py-1">
+    <div className="mx-auto min-h-dvh max-w-[480px] pb-20 lg:flex lg:h-dvh lg:max-w-none lg:overflow-hidden lg:pb-0">
+      <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">
+      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-bg px-2 py-1">
         <button
           type="button"
-          className="flex min-h-11 max-w-[75%] items-center gap-1 px-2 text-left"
+          className="flex min-h-11 max-w-[75%] shrink-0 items-center gap-1 px-2 text-left lg:max-w-[14rem]"
           onClick={() => {
             setMenuOpen(false);
             setPickerOpen(true);
@@ -452,20 +453,32 @@ export function TripLayout() {
           <span className="shrink-0 text-xs text-accent-dark">▾</span>
         </button>
 
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            aria-label="更多"
-            className="flex h-11 w-11 items-center justify-center text-lg tracking-widest text-accent-dark"
-            onClick={() => {
-              setPickerOpen(false);
-              setMenuOpen((v) => !v);
-            }}
-          >
-            ···
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-11 z-30 min-w-[168px] overflow-hidden rounded-btn border border-line bg-bg shadow-warm">
+        <div className="flex min-w-0 items-center gap-1">
+          <TripTabBar tripId={id} />
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              aria-label="更多"
+              className="flex h-11 w-11 items-center justify-center text-lg tracking-widest text-accent-dark lg:hidden"
+              onClick={() => {
+                setPickerOpen(false);
+                setMenuOpen((v) => !v);
+              }}
+            >
+              ···
+            </button>
+            <button
+              type="button"
+              className="hidden h-9 items-center rounded-btn px-3 text-sm text-accent-dark lg:flex"
+              onClick={() => {
+                setPickerOpen(false);
+                setMenuOpen((v) => !v);
+              }}
+            >
+              设置
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 min-w-[168px] overflow-hidden rounded-btn border border-line bg-bg shadow-warm">
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm"
@@ -547,6 +560,7 @@ export function TripLayout() {
               </button>
             </div>
           )}
+          </div>
         </div>
       </header>
 
@@ -565,8 +579,10 @@ export function TripLayout() {
           {shareHint}
         </p>
       )}
-      <Outlet context={{ trip, setTrip, writeOpts }} />
-      <TripTabBar tripId={id} />
+      <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
+        <Outlet context={{ trip, setTrip, writeOpts }} />
+      </div>
+      </div>
 
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} aria-label="切换行程">
         <p className="mb-3 text-sm font-semibold">切换行程</p>

@@ -33,6 +33,7 @@ const publicTripSelect = {
           bookAheadDays: true,
           bookRemindAt: true,
           bookUrl: true,
+          mapHidden: true,
           poi: {
             select: {
               id: true,

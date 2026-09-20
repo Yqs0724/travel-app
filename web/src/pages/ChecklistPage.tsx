@@ -90,7 +90,7 @@ export function ChecklistPage() {
   if (!id) return null;
 
   return (
-    <div className="px-4 pt-4 pb-6">
+    <div className="px-4 pt-4 pb-6 desk-read">
       <form onSubmit={(e) => void onAdd(e)} className="flex gap-2">
         <input
           className="h-11 min-w-0 flex-1 rounded-full bg-surface-2 px-4 text-sm outline-none placeholder:text-ink-muted"

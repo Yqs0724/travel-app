@@ -56,13 +56,14 @@ async function main() {
   if (existsSync(webDist)) {
     await app.register(fastifyStatic, {
       root: webDist,
-      wildcard: false,
+      // 必须为 true，否则 /assets/* 找不到会掉进 SPA 回退，整页白屏
+      wildcard: true,
     });
     app.setNotFoundHandler((req, reply) => {
       if (req.method !== "GET" && req.method !== "HEAD") {
         return reply.code(404).send({ code: 404, data: null, message: "Not Found" });
       }
-      if (req.url.startsWith("/api")) {
+      if (req.url.startsWith("/api") || req.url.startsWith("/assets/")) {
         return reply.code(404).send({ code: 404, data: null, message: "Not Found" });
       }
       return reply.sendFile("index.html");

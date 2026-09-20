@@ -451,6 +451,7 @@ export function SharePage() {
                   {addOpen ? (
                     <AddPlaceForm
                       day={day}
+                      tripDays={trip.days}
                       writeOpts={writeOpts}
                       onDayChange={onDayChange}
                       onDone={() => setAddOpen(false)}
@@ -476,6 +477,7 @@ export function SharePage() {
           day={day}
           item={sheet.item}
           index={sheet.index}
+          tripDays={trip.days}
           writeOpts={writeOpts}
           onDayChange={(next) => {
             onDayChange(next);

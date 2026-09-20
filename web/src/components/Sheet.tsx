@@ -99,7 +99,7 @@ export function Sheet({
         className={
           isLightbox
             ? `max-h-[90vh] max-w-[min(100%,480px)] p-2 ${className}`
-            : `max-h-[min(85dvh,85vh)] w-full max-w-[480px] overflow-y-auto rounded-t-[20px] bg-bg px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-4 shadow-warm sm:rounded-card ${className}`
+            : `max-h-[min(85dvh,85vh)] w-full max-w-[480px] overflow-y-auto rounded-t-[20px] bg-bg px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-4 shadow-warm sm:rounded-card lg:max-w-xl ${className}`
         }
         onClick={(e) => e.stopPropagation()}
         role="dialog"

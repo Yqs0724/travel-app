@@ -1,7 +1,7 @@
 # 行迹 TripTrace 技术设计文档
 
-> 版本：v1.1 ｜ 日期：2026-09-16 ｜ 对应 PRD：v1.2  
-> v1.1：对齐「我的代付账本」、取消估价→账单同步、`ShareLink.kind`、AA 小票快照。冲突时以本文件 + [PROGRESS.md](./PROGRESS.md) 为准。
+> 版本：v1.2 ｜ 日期：2026-09-19 ｜ 对应 PRD：v1.2  
+> v1.2：全程总览两段滑块、leg 可写 `durationMin`、大屏两列。点选测距不落库。冲突时以本文件 + [PROGRESS.md](./PROGRESS.md) 为准。
 
 ---
 
@@ -94,7 +94,9 @@ web/
 ### 3.2 关键前端决策
 
 - **路由**：`/trips/:id/plan|nearby|ai|checklist|budget`；`/trips/:id/map` → 重定向 `plan`；`/share/:token`（`kind=trip` 只读行程，或 `kind=aa` 小票；可选 `?for=`）。
-- **地图封装**：仅 `features/planner/MapView.tsx`；编号针、多色 leg、点芯片改 mode、飞点。
+- **地图封装**：仅 `features/planner/MapView.tsx`。单日：编号针 + 多色 leg + 中段标签（`交通 · 分 · km`），点标签改 mode 和 `durationMin`。总览见下。
+- **全程总览**（`PlanPage`，`dayIndex === -1`）：与某一天互斥，点圆点 `goDay(i)` 进入该天。地图右上两段互斥滑块。`day` = 画出各天路线（按天着色）。`measure` = 点选测距（`measureIds` 按点击顺序；两点一条直线，≥3 封闭）。点线 `onCancelSpan` 去掉该边（`cutKeys`）；最后一条连选中一起清掉。点标签 `onEditSpan` 只改会话内 `spanOverrides`，刷新即丢，不调用 `updateLeg`。已删除且不要恢复：凸包外围、全部落点、跨天虚线、只看标点、总览内用圆点换 `mapDay` 预览。
+- **大屏**：Tailwind `lg` = 1024px。`index.css` 里 `.plan-root` 两列：左 `.plan-head` + `.plan-sheet`，右 `.plan-map`（描边 + `box-shadow: 0 0 0 4px #ede6dc`）。顶栏 Tab 与「设置」在 `TripLayout` / `TripTabBar`。手机底栏不变。
 - **周边**：`features/nearby/NearbyPanel.tsx`；锚点可选 + 关键词；半屏可跳转。
 - **记账 UI**：`ExpensePanel`；AA 票：`AaTicket` + `aaExport`（链接/HTML/PDF）。
 - **拖拽**：`dnd-kit`（已有则复用，不另引库）。
@@ -222,7 +224,7 @@ model POI {
 model TransportLeg {
   id         String @id @default(cuid())
   fromItemId String @unique
-  mode       String           // walk/transit/drive/bike/train/flight
+  mode       String           // walk/transit/subway/drive/bike/train/flight
   distanceM  Int?
   durationMin Int?
   cost       Float?           // 路费估价：仅行程参考，禁止写入 Expense
@@ -301,9 +303,9 @@ model ShareLink {
 | PATCH | `/api/v1/items/:id` | 修改条目（时间/门票/预约标记） |
 | DELETE | `/api/v1/items/:id` | 删除条目 |
 | PUT | `/api/v1/days/:dayId/items/reorder` | 拖拽重排（body: 有序 itemId 数组）★ |
-| PATCH | `/api/v1/items/:id/leg` | 修改到下一地点的交通方式 ★ |
+| PATCH | `/api/v1/items/:id/leg` | 改到下一站的交通方式；body 可带 `durationMin`（1–2880）★ |
 
-★ 标记的接口：**返回重算后的整天日程**（耗时、时间顺延），前端整包替换。**不含**预算/账单同步。
+★ 标记的接口：**返回重算后的整天日程**，前端整包替换。**不含**预算/账单同步。`updateLeg` 传入的 `durationMin` 在 `recomputeDay` 里会保留；只改交通方式、不传用时，则用路径规划的新耗时。点选测距不走这个接口。
 
 ### 6.2 AI 助手
 
@@ -354,6 +356,8 @@ model ShareLink {
 |---|---|---|---|
 | 高德 JS API | 地图渲染、标注、连线 | 前端直连（JS Key + 域名白名单） | 地图挂时列表视图照常可用 |
 | 高德 Web 服务 | POI 搜索/坐标校验、路径规划、天气、实时路况 | 后端 providers/amap.ts（Web 服务 Key） | POI/路径失败 → 提示手动输入；天气失败 → 该卡片隐藏不阻塞 |
+
+路径规划：`walk`/`drive`/`bike` 走对应 direction；`subway`/`transit` 走 `v3/direction/transit/integrated`（逆地理取 city；地铁优先挑含地铁方案；失败再降级驾车）。无独立「纯地铁」接口。
 | LLM API | 笔记提取地点、生成/调整行程 | 后端 providers/llm.ts（OpenAI 兼容格式，baseURL 可配置） | 失败 → 保留纯手动建行程路径 |
 
 **LLM 行程生成的 prompt 设计要点**（后端 ai.service 内实现）：
@@ -372,7 +376,7 @@ planner.service.ts
 ├── reorderItems / updateLeg / addItem / removeItem
 │     1. 事务内改 seq / mode / CRUD
 │     2. providers/amap 重算相邻 leg（POI 缓存）
-│     3. 顺延当日时刻
+│     3. 若这次调用带了 durationMin，用它覆盖规划耗时；否则用规划结果。重排时把已有 durationMin 传回去，手动用时不被冲掉
 │     4. **不**写 Expense（估价仅留在 item/leg 字段）
 │     5. 返回重算后的整天数据
 └── updateTripDates → 天气 / 预约倒计时重算

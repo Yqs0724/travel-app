@@ -323,7 +323,7 @@ export function NearbyPanel({
   const status = error || (busy ? "搜索中…" : hint);
 
   return (
-    <div className="flex flex-col gap-2 px-4 pt-3 pb-4">
+    <div className="flex flex-col gap-2 px-4 pt-3 pb-4 desk-read">
       {/* 搜 + 中心 + 日：两行收口 */}
       <form onSubmit={onSearch} className="flex gap-2">
         <input

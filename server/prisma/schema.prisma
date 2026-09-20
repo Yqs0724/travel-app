@@ -53,6 +53,8 @@ model ItineraryItem {
   /** 预约方式备注：链接 / 公众号 / 电话等，自由文本 */
   bookUrl       String?
   note          String?
+  /** 地图上不画这个点；前后景点仍连线。不改已存路段 */
+  mapHidden     Boolean        @default(false)
   day           TripDay        @relation(fields: [dayId], references: [id], onDelete: Cascade)
   legToNext     TransportLeg?
 }

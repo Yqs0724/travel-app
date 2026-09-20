@@ -235,7 +235,7 @@ export function ExpensePanel({
   const othersOwe = sum?.othersOweMe ?? 0;
 
   return (
-    <div className="px-4 pt-4 pb-8">
+    <div className="px-4 pt-4 pb-8 desk-read">
       <p className="text-[20px] font-semibold tabular-nums">{yuan(sum?.total ?? 0)}</p>
       <p className="mt-1 text-xs text-ink-muted">我已支出</p>
       <div className="mt-2 flex gap-4 text-xs text-ink-muted">

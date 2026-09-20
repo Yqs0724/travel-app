@@ -173,11 +173,125 @@ function modePath(mode: string): string | null {
     case "bike":
       return "https://restapi.amap.com/v4/direction/bicycling";
     case "transit":
-      // 公交需 city，无城市时用驾车估耗时
-      return "https://restapi.amap.com/v3/direction/driving";
+    case "subway":
+      return null; // 走 routeTransit
     default:
       return null;
   }
+}
+
+type TransitSeg = {
+  walking?: { steps?: Array<{ polyline?: string }> };
+  bus?: {
+    buslines?: Array<{ name?: string; type?: string; polyline?: string }>;
+  };
+};
+
+/** 方案里是否含地铁/轨交 */
+export function transitHasSubway(transit: { segments?: TransitSeg[] }): boolean {
+  for (const seg of transit.segments ?? []) {
+    for (const line of seg.bus?.buslines ?? []) {
+      const blob = `${line.name ?? ""}${line.type ?? ""}`;
+      if (/地铁|轨交|轻轨|subway/i.test(blob)) return true;
+    }
+  }
+  return false;
+}
+
+/** 从公交换乘方案抽出折线 */
+export function polylineFromTransit(transit: { segments?: TransitSeg[] }): [number, number][] {
+  const out: [number, number][] = [];
+  for (const seg of transit.segments ?? []) {
+    if (seg.walking?.steps) out.push(...polylineFromSteps(seg.walking.steps));
+    for (const line of seg.bus?.buslines ?? []) {
+      if (line.polyline) out.push(...parseAmapPolyline(line.polyline));
+    }
+  }
+  return out;
+}
+
+/** 地铁优先时挑含地铁的最短方案，否则取列表第一条 */
+export function pickTransit(
+  transits: Array<{
+    duration?: string | number;
+    distance?: string | number;
+    cost?: string | number;
+    segments?: TransitSeg[];
+  }>,
+  preferSubway: boolean,
+) {
+  if (!transits.length) return null;
+  if (!preferSubway) return transits[0]!;
+  const withMetro = transits.filter((t) => transitHasSubway(t));
+  const pool = withMetro.length ? withMetro : transits;
+  return pool.reduce((a, b) => (Number(a.duration ?? 1e12) <= Number(b.duration ?? 1e12) ? a : b));
+}
+
+const cityNearCache = new Map<string, { at: number; city: string; citycode: string }>();
+const CITY_NEAR_MS = 24 * 60 * 60 * 1000;
+
+async function cityNear(lng: number, lat: number): Promise<{ city: string; citycode: string }> {
+  const key = `${lng.toFixed(2)},${lat.toFixed(2)}`;
+  const hit = cityNearCache.get(key);
+  if (hit && Date.now() - hit.at < CITY_NEAR_MS) return { city: hit.city, citycode: hit.citycode };
+
+  const data = await amapGet("https://restapi.amap.com/v3/geocode/regeo", {
+    location: `${lng},${lat}`,
+    extensions: "base",
+  });
+  if (String(data.status) !== "1") {
+    throw Object.assign(new Error(String(data.info ?? "逆地理失败")), { code: 50201 });
+  }
+  const comp = (data.regeocode as { addressComponent?: Record<string, string | string[]> } | undefined)
+    ?.addressComponent;
+  const rawCity = comp?.city || comp?.province || comp?.district || "";
+  const city = Array.isArray(rawCity) ? rawCity[0] ?? "" : String(rawCity);
+  const rawCode = comp?.citycode || comp?.adcode || "";
+  const citycode = Array.isArray(rawCode) ? rawCode[0] ?? "" : String(rawCode);
+  if (!city && !citycode) throw Object.assign(new Error("无法解析城市"), { code: 50201 });
+  const row = { at: Date.now(), city: city || citycode, citycode: citycode || city };
+  cityNearCache.set(key, row);
+  return { city: row.city, citycode: row.citycode };
+}
+
+/** 高德公交综合规划（含地铁）。subway → 地铁优先；transit → 尽量不乘地铁 */
+async function routeTransit(
+  from: { lng: number; lat: number },
+  to: { lng: number; lat: number },
+  preferSubway: boolean,
+): Promise<RouteResult> {
+  const near = await cityNear(from.lng, from.lat);
+  const city = near.city || near.citycode;
+  // v3：0 最快捷（常含水/地铁）；5 不乘地铁。地铁优先时再在结果里挑含地铁的方案
+  const strategy = preferSubway ? "0" : "5";
+  const data = await amapGet("https://restapi.amap.com/v3/direction/transit/integrated", {
+    origin: `${from.lng},${from.lat}`,
+    destination: `${to.lng},${to.lat}`,
+    city,
+    strategy,
+    extensions: "all",
+  });
+  if (String(data.status) !== "1") {
+    throw Object.assign(new Error(String(data.info ?? "公交路径失败")), { code: 50201 });
+  }
+  const route = data.route as {
+    transits?: Array<{
+      duration?: string;
+      distance?: string;
+      cost?: string;
+      segments?: TransitSeg[];
+    }>;
+  };
+  const best = pickTransit(route.transits ?? [], preferSubway);
+  if (!best) throw Object.assign(new Error("无可用公交/地铁方案"), { code: 50201 });
+  const polyline = polylineFromTransit(best);
+  const costN = best.cost != null && best.cost !== "" ? Number(best.cost) : NaN;
+  return {
+    distanceM: Math.round(Number(best.distance ?? 0)),
+    durationMin: Math.max(1, Math.round(Number(best.duration ?? 0) / 60)),
+    cost: Number.isFinite(costN) ? costN : undefined,
+    polyline: polyline.length ? polyline : undefined,
+  };
 }
 
 export async function routeBetween(
@@ -185,6 +299,18 @@ export async function routeBetween(
   to: { lng: number; lat: number },
   mode: string,
 ): Promise<RouteResult> {
+  if (mode === "transit" || mode === "subway") {
+    try {
+      return await routeTransit(from, to, mode === "subway");
+    } catch (e) {
+      try {
+        return await routeBetween(from, to, "drive");
+      } catch {
+        throw e;
+      }
+    }
+  }
+
   const path = modePath(mode);
   if (!path) throw Object.assign(new Error("该交通方式不支持路径规划"), { code: 50201 });
 

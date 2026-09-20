@@ -26,7 +26,7 @@ export async function proxyRoutes(app: FastifyInstance) {
       .object({
         from: z.string().regex(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/),
         to: z.string().regex(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/),
-        mode: z.enum(["walk", "transit", "drive", "bike"]),
+        mode: z.enum(["walk", "transit", "subway", "drive", "bike"]),
       })
       .safeParse(req.query);
     if (!q.success) return reply.status(400).send(fail(40001, "参数无效"));

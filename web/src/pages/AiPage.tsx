@@ -17,7 +17,7 @@ export function AiPage() {
   }
 
   return (
-    <div className="px-4 pt-4 pb-4">
+    <div className="px-4 pt-4 pb-4 desk-read">
       <AiPlannerPanel
         tripId={trip.id}
         days={trip.days}

@@ -10,7 +10,7 @@ export const dayInclude = {
   },
 };
 
-const MODES = new Set(["walk", "transit", "drive", "bike", "train", "flight"]);
+const MODES = new Set(["walk", "transit", "subway", "drive", "bike", "train", "flight"]);
 
 export function assertMode(mode: string) {
   if (!MODES.has(mode)) {
@@ -136,6 +136,7 @@ async function upsertLeg(
   mode: string,
   from: Point,
   to: Point,
+  durationOverride?: number,
 ) {
   let distanceM: number | null = null;
   let durationMin: number | null = null;
@@ -151,6 +152,7 @@ async function upsertLeg(
       // 高德不可用时保留 mode，耗时留给手动
     }
   }
+  if (durationOverride != null) durationMin = durationOverride;
 
   return prisma.transportLeg.upsert({
     where: { fromItemId },
@@ -172,8 +174,15 @@ async function recomputeDay(dayId: string) {
       }
       continue;
     }
-    const mode = cur.legToNext?.mode ?? "walk";
-    await upsertLeg(cur.id, mode, itemPoint(cur), itemPoint(next));
+    const mode = cur.legToNext?.mode ?? "drive";
+    // ponytail: 手改的用时在重排时保住。要让改点位后自动重算用时，得加 manual 标记，没标记才覆盖。
+    await upsertLeg(
+      cur.id,
+      mode,
+      itemPoint(cur),
+      itemPoint(next),
+      cur.legToNext?.durationMin ?? undefined,
+    );
   }
 
   const refreshed = await loadOrderedItems(dayId);
@@ -188,16 +197,62 @@ async function recomputeDay(dayId: string) {
   return getDay(dayId);
 }
 
+export type PoiInput = {
+  name: string;
+  lng: number;
+  lat: number;
+  amapId?: string;
+  city?: string;
+  category?: string;
+};
+
+/** 写入/复用 POI 行，返回 id */
+export async function ensurePoiId(poi: PoiInput): Promise<string> {
+  if (poi.amapId) {
+    const existing = await prisma.pOI.findUnique({ where: { amapId: poi.amapId } });
+    if (existing) return existing.id;
+    const created = await prisma.pOI.create({
+      data: {
+        amapId: poi.amapId,
+        name: poi.name,
+        lng: poi.lng,
+        lat: poi.lat,
+        city: poi.city,
+        category: poi.category,
+      },
+    });
+    return created.id;
+  }
+  const created = await prisma.pOI.create({
+    data: {
+      name: poi.name,
+      lng: poi.lng,
+      lat: poi.lat,
+      city: poi.city,
+      category: poi.category,
+    },
+  });
+  return created.id;
+}
+
+/** 本行程已用过的同名 POI（每天加酒店不用重新搜） */
+export async function findTripPoiIdByName(tripId: string, name: string): Promise<string | null> {
+  const n = name.trim();
+  if (!n) return null;
+  const hit = await prisma.itineraryItem.findFirst({
+    where: {
+      day: { tripId },
+      poiId: { not: null },
+      poi: { name: n },
+    },
+    select: { poiId: true },
+  });
+  return hit?.poiId ?? null;
+}
+
 export type AddItemInput = {
   customName?: string;
-  poi?: {
-    name: string;
-    lng: number;
-    lat: number;
-    amapId?: string;
-    city?: string;
-    category?: string;
-  };
+  poi?: PoiInput;
   startTime?: string;
   durationMin?: number;
   ticketPrice?: number;
@@ -225,37 +280,14 @@ export async function addItem(dayId: string, input: AddItemInput) {
   const seq = (max._max.seq ?? -1) + 1;
 
   let poiId: string | undefined;
+  let customName = input.customName;
   if (input.poi) {
-    if (input.poi.amapId) {
-      const existing = await prisma.pOI.findUnique({
-        where: { amapId: input.poi.amapId },
-      });
-      if (existing) {
-        poiId = existing.id;
-      } else {
-        const created = await prisma.pOI.create({
-          data: {
-            amapId: input.poi.amapId,
-            name: input.poi.name,
-            lng: input.poi.lng,
-            lat: input.poi.lat,
-            city: input.poi.city,
-            category: input.poi.category,
-          },
-        });
-        poiId = created.id;
-      }
-    } else {
-      const created = await prisma.pOI.create({
-        data: {
-          name: input.poi.name,
-          lng: input.poi.lng,
-          lat: input.poi.lat,
-          city: input.poi.city,
-          category: input.poi.category,
-        },
-      });
-      poiId = created.id;
+    poiId = await ensurePoiId(input.poi);
+  } else if (input.customName) {
+    const reused = await findTripPoiIdByName(day.tripId, input.customName);
+    if (reused) {
+      poiId = reused;
+      customName = undefined; // 标题走 POI，地图有坐标
     }
   }
 
@@ -264,7 +296,7 @@ export async function addItem(dayId: string, input: AddItemInput) {
       dayId,
       seq,
       poiId,
-      customName: input.customName,
+      customName,
       startTime: input.startTime,
       durationMin: input.durationMin ?? 60,
       ticketPrice: input.ticketPrice,
@@ -290,16 +322,27 @@ export type UpdateItemInput = {
   bookRemindAt?: string | null;
   bookUrl?: string | null;
   note?: string | null;
+  mapHidden?: boolean;
+  /** 给无坐标点补上 POI（如后天酒店复用第一天） */
+  poi?: PoiInput;
 };
 
 export async function updateItem(itemId: string, input: UpdateItemInput) {
   const item = await prisma.itineraryItem.findUnique({ where: { id: itemId } });
   if (!item) throw Object.assign(new Error("行程条目不存在"), { code: 40003 });
 
+  let poiId: string | undefined;
+  let customName = input.customName;
+  if (input.poi) {
+    poiId = await ensurePoiId(input.poi);
+    if (customName === undefined) customName = null;
+  }
+
   await prisma.itineraryItem.update({
     where: { id: itemId },
     data: {
-      customName: input.customName,
+      ...(poiId != null ? { poiId } : {}),
+      customName,
       startTime: input.startTime,
       durationMin: input.durationMin,
       ticketPrice: input.ticketPrice,
@@ -308,6 +351,7 @@ export async function updateItem(itemId: string, input: UpdateItemInput) {
       bookRemindAt: input.bookRemindAt,
       bookUrl: input.bookUrl,
       note: input.note,
+      mapHidden: input.mapHidden,
     },
   });
 
@@ -456,7 +500,7 @@ export async function reorderItems(dayId: string, orderedIds: string[]) {
   return recomputeDay(dayId);
 }
 
-export async function updateLeg(itemId: string, mode: string) {
+export async function updateLeg(itemId: string, mode: string, durationMin?: number) {
   assertMode(mode);
   const item = await prisma.itineraryItem.findUnique({
     where: { id: itemId },
@@ -474,6 +518,6 @@ export async function updateLeg(itemId: string, mode: string) {
     });
   }
 
-  await upsertLeg(item.id, mode, itemPoint(item), itemPoint(next));
+  await upsertLeg(item.id, mode, itemPoint(item), itemPoint(next), durationMin);
   return recomputeDay(item.dayId);
 }

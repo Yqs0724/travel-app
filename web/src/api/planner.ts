@@ -33,6 +33,7 @@ export type ItineraryItem = {
   bookRemindAt: string | null;
   bookUrl: string | null;
   note: string | null;
+  mapHidden: boolean;
   legToNext: TransportLeg | null;
 };
 
@@ -45,24 +46,35 @@ export type TripDay = {
   editVersion?: number;
 };
 
-export type TransportMode = "walk" | "transit" | "drive" | "bike" | "train" | "flight";
+export type TransportMode = "walk" | "transit" | "subway" | "drive" | "bike" | "train" | "flight";
 
 export const MODE_LABELS: Record<TransportMode, string> = {
   walk: "步行",
   transit: "公交",
+  subway: "地铁",
   drive: "驾车",
   bike: "骑行",
   train: "高铁",
   flight: "飞机",
 };
 
+export function formatKm(distanceM: number | null | undefined): string | null {
+  if (distanceM == null || !Number.isFinite(distanceM) || distanceM <= 0) return null;
+  const km = distanceM / 1000;
+  const n = km >= 10 ? String(Math.round(km)) : km.toFixed(1).replace(/\.0$/, "");
+  return `${n}km`;
+}
+
 export function legLabel(
-  leg: { mode: string; durationMin: number | null } | null | undefined,
+  leg: { mode: string; durationMin: number | null; distanceM?: number | null } | null | undefined,
 ): string | null {
   if (!leg) return null;
   const mode = MODE_LABELS[leg.mode as TransportMode] ?? (leg.mode.trim() || "交通");
-  if (leg.durationMin != null && leg.durationMin > 0) return `${mode} · 约 ${leg.durationMin} 分`;
-  return mode;
+  const bits = [mode];
+  if (leg.durationMin != null && leg.durationMin > 0) bits.push(`约 ${leg.durationMin} 分`);
+  const km = formatKm(leg.distanceM);
+  if (km) bits.push(km);
+  return bits.join(" · ");
 }
 
 export type PoiHit = {
@@ -167,6 +179,15 @@ export function updateItem(
     bookRemindAt: string | null;
     bookUrl: string | null;
     ticketPrice: number | null;
+    mapHidden: boolean;
+    poi: {
+      name: string;
+      lng: number;
+      lat: number;
+      amapId?: string;
+      city?: string;
+      category?: string;
+    };
   }>,
   opts?: WriteOpts,
 ) {
@@ -213,10 +234,20 @@ export function reorderItems(dayId: string, orderedIds: string[], opts?: WriteOp
   );
 }
 
-export function updateLeg(itemId: string, mode: TransportMode, opts?: WriteOpts) {
+export function updateLeg(
+  itemId: string,
+  mode: TransportMode,
+  opts?: WriteOpts,
+  durationMin?: number,
+) {
   return api<TripDay>(
     `/api/v1/items/${itemId}/leg`,
-    { method: "PATCH", body: JSON.stringify(withVersion({ mode }, opts)) },
+    {
+      method: "PATCH",
+      body: JSON.stringify(
+        withVersion(durationMin != null ? { mode, durationMin } : { mode }, opts),
+      ),
+    },
     opts,
   );
 }

@@ -53,6 +53,8 @@ const updateSchema = z.object({
     .optional(),
   bookUrl: z.string().max(500).nullable().optional(),
   note: z.string().nullable().optional(),
+  mapHidden: z.boolean().optional(),
+  poi: poiSchema.optional(),
   clientRequestId: z.string().optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
 });
@@ -64,7 +66,8 @@ const reorderSchema = z.object({
 });
 
 const legSchema = z.object({
-  mode: z.enum(["walk", "transit", "drive", "bike", "train", "flight"]),
+  mode: z.enum(["walk", "transit", "subway", "drive", "bike", "train", "flight"]),
+  durationMin: z.number().int().positive().max(60 * 48).optional(),
   clientRequestId: z.string().optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
 });
@@ -180,7 +183,7 @@ export async function plannerRoutes(app: FastifyInstance) {
       const tripId = await planner.tripIdForItem(id);
       await assertEditorTrip(req, tripId);
       if (tripId) await planner.bumpEditVersion(tripId, parsed.data.expectedVersion);
-      const day = await planner.updateLeg(id, parsed.data.mode);
+      const day = await planner.updateLeg(id, parsed.data.mode, parsed.data.durationMin);
       return ok(await planner.attachEditVersion(day!));
     } catch (e) {
       return handleErr(reply, e);

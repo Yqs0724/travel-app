@@ -1,13 +1,15 @@
-﻿import { FormEvent, useState } from "react";
+﻿import { FormEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   MODE_LABELS,
   deleteItem,
+  formatKm,
   itemTitle,
   reorderItems,
   updateItem,
   updateLeg,
   type ItineraryItem,
+  type PoiHit,
   type TransportMode,
   type TripDay,
   type WriteOpts,
@@ -16,7 +18,7 @@ import { isErr } from "@/api/client";
 import { Button } from "@/components/Button";
 import { DateField, TimeField } from "@/components/DateTimeFields";
 import { Sheet } from "@/components/Sheet";
-
+import { tripPoiHits } from "./tripPois";
 const MODES = Object.keys(MODE_LABELS) as TransportMode[];
 
 function addDaysISO(isoDate: string, delta: number): string {
@@ -60,6 +62,7 @@ export function ItemEditSheet({
   item,
   index,
   tripId,
+  tripDays,
   onDayChange,
   onClose,
   writeOpts,
@@ -69,6 +72,8 @@ export function ItemEditSheet({
   index: number;
   /** 有则显示「周边 / 找厕所」跳转；分享页不传 */
   tripId?: string;
+  /** 无坐标时可从本行程其它天补坐标 */
+  tripDays?: { items: ItineraryItem[] }[];
   onDayChange: (day: TripDay) => void;
   onClose: () => void;
   writeOpts?: WriteOpts;
@@ -77,6 +82,7 @@ export function ItemEditSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needBook, setNeedBook] = useState(item.needBook);
+  const [mapHidden, setMapHidden] = useState(!!item.mapHidden);
   const initialRemind = resolveRemindFields(day.date, item.bookRemindAt, item.bookAheadDays);
   const [bookDate, setBookDate] = useState(initialRemind.date);
   const [bookTime, setBookTime] = useState(initialRemind.time);
@@ -87,6 +93,8 @@ export function ItemEditSheet({
 
   const hasCoords =
     item.poi != null && Number.isFinite(item.poi.lng) && Number.isFinite(item.poi.lat);
+
+  const tripHits = useMemo(() => tripPoiHits(tripDays ?? []), [tripDays]);
 
   function goNearby(mode: "food" | "toilet") {
     if (!tripId || !hasCoords) return;
@@ -104,6 +112,28 @@ export function ItemEditSheet({
     return true;
   }
 
+  async function linkPoi(h: PoiHit) {
+    setBusy(true);
+    const ok = await apply(
+      await updateItem(
+        item.id,
+        {
+          poi: {
+            name: h.name,
+            lng: h.lng,
+            lat: h.lat,
+            amapId: h.amapId,
+            city: h.city,
+            category: h.category,
+          },
+        },
+        writeOpts,
+      ),
+    );
+    setBusy(false);
+    if (!ok) return;
+  }
+
   async function onSave(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -116,6 +146,7 @@ export function ItemEditSheet({
           bookAheadDays: needBook ? daysBetween(bookDate || day.date.slice(0, 10), day.date.slice(0, 10)) : null,
           bookUrl: needBook ? bookUrl.trim() || null : null,
           ticketPrice: ticket.trim() === "" ? null : Number(ticket),
+          mapHidden,
         },
         writeOpts,
       ),
@@ -166,6 +197,29 @@ export function ItemEditSheet({
 
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
 
+        {!hasCoords && tripHits.length > 0 && (
+          <div className="mb-3 space-y-1.5">
+            <p className="text-xs text-warn">无坐标，地图不显示。点选本行程地点补上：</p>
+            <ul className="max-h-28 overflow-y-auto rounded-btn border border-line scroll-warm">
+              {tripHits.map((h) => (
+                <li key={h.amapId}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-surface-2 disabled:opacity-50"
+                    onClick={() => void linkPoi(h)}
+                  >
+                    {h.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {!hasCoords && tripHits.length === 0 && (
+          <p className="mb-3 text-xs text-warn">无坐标，地图不显示。请删除后重新搜索添加。</p>
+        )}
+
         <form onSubmit={(e) => void onSave(e)} className="space-y-3">
           <label className="block text-xs text-ink-muted">
             <span className="mb-1 block text-center">门票（元）</span>
@@ -209,6 +263,21 @@ export function ItemEditSheet({
             <p className="text-xs text-ink-muted">无地图坐标时不可查周边</p>
           ) : null}
 
+          {hasCoords && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={mapHidden}
+                onChange={(e) => setMapHidden(e.target.checked)}
+                className="h-4 w-4 accent-accent-dark"
+              />
+              地图上隐藏
+            </label>
+          )}
+          {hasCoords && mapHidden && (
+            <p className="text-xs text-ink-muted">不画这个点，前后景点仍连线。目录里还在，可再打开取消。</p>
+          )}
+
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -251,6 +320,7 @@ export function ItemEditSheet({
             <p className="mb-2 text-xs text-ink-muted">
               前往下一站
               {item.legToNext.durationMin != null ? ` · 约 ${item.legToNext.durationMin} 分` : ""}
+              {formatKm(item.legToNext.distanceM) ? ` · ${formatKm(item.legToNext.distanceM)}` : ""}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {MODES.map((m) => (

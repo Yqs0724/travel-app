@@ -13,6 +13,7 @@ import {
 import {
   MODE_LABELS,
   clearDayItems,
+  fetchRoute,
   itemTitle,
   updateLeg,
   type ItineraryItem,
@@ -30,6 +31,37 @@ import { ItemEditSheet } from "@/features/planner/ItemEditSheet";
 import { MapView, LEG_COLORS } from "@/features/planner/MapView";
 
 const LEG_MODES = Object.keys(MODE_LABELS) as TransportMode[];
+
+const OVERVIEW_MODES = [
+  ["day", "当天路线"],
+  ["measure", "点选测距"],
+] as const;
+type OverviewMode = (typeof OVERVIEW_MODES)[number][0];
+type SpanOverride = { mode: TransportMode; durationMin: number | null };
+
+/** 两点一条线，三点起按点击顺序封闭。 */
+function spanEdges(ids: string[]): [string, string][] {
+  if (ids.length < 2) return [];
+  const n = ids.length >= 3 ? ids.length : 1;
+  const out: [string, string][] = [];
+  for (let i = 0; i < n; i++) out.push([ids[i]!, ids[(i + 1) % ids.length]!]);
+  return out;
+}
+
+/** 点掉一条线。最后一条连选中一起清掉，否则只藏这条边。 */
+function nextMeasure(ids: string[], cut: string[], dropKey: string) {
+  const nextCut = cut.includes(dropKey) ? cut : [...cut, dropKey];
+  const visible = spanEdges(ids).filter(([a, b]) => !nextCut.includes(`${a}>${b}`));
+  if (visible.length === 0) return { ids: [] as string[], cut: [] as string[] };
+  return { ids, cut: nextCut };
+}
+
+{
+  const two = nextMeasure(["a", "b"], [], "a>b");
+  const tri = nextMeasure(["a", "b", "c"], [], "a>b");
+  if (two.ids.length !== 0 || two.cut.length !== 0) throw new Error("span: last line");
+  if (tri.ids.join() !== "a,b,c" || tri.cut.join() !== "a>b") throw new Error("span: one side");
+}
 
 type Ctx = {
   trip: TripDetail | null;
@@ -57,9 +89,10 @@ type Snap = "half" | "full" | "peek";
 
 export function PlanPage() {
   const { trip, setTrip, writeOpts } = useOutletContext<Ctx>();
-  const [dayIndex, setDayIndex] = useState(0);
+  const [dayIndex, setDayIndex] = useState(-1);
   const [editing, setEditing] = useState<{ item: ItineraryItem; index: number } | null>(null);
   const [legEditId, setLegEditId] = useState<string | null>(null);
+  const [legMinutes, setLegMinutes] = useState("");
   const [legBusy, setLegBusy] = useState(false);
   const [legError, setLegError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
@@ -78,6 +111,11 @@ export function PlanPage() {
   const [weatherHint, setWeatherHint] = useState<string | null>(null);
   const [reminders, setReminders] = useState<BookingReminder[]>([]);
   const [traffic, setTraffic] = useState<DayTraffic | null>(null);
+  const [overviewMode, setOverviewMode] = useState<OverviewMode>("day");
+  const [measureIds, setMeasureIds] = useState<string[]>([]);
+  const [cutKeys, setCutKeys] = useState<string[]>([]);
+  const [spanOverrides, setSpanOverrides] = useState<Record<string, SpanOverride>>({});
+  const [spanEdit, setSpanEdit] = useState<{ fromId: string; toId: string; mode: TransportMode } | null>(null);
 
   useEffect(() => {
     const el = dotRefs.current[dayIndex + 1];
@@ -144,11 +182,41 @@ export function PlanPage() {
     });
   }, [trip]);
 
+  useEffect(() => {
+    setDayIndex(-1);
+    setEditing(null);
+    setLegEditId(null);
+    setFocusId(null);
+    setAddOpen(false);
+  }, [trip?.id]);
+
   const overview = dayIndex < 0;
-  const overviewGroups = useMemo(
-    () => (overview && trip ? trip.days.map((d) => d.items) : undefined),
-    [overview, trip],
-  );
+  const measureOn = overviewMode === "measure";
+  const showDayRoutes = overviewMode === "day";
+  const overviewGroups = useMemo(() => {
+    if (!overview || !trip) return undefined;
+    return trip.days.map((d) => d.items);
+  }, [overview, trip?.days]);
+
+  useEffect(() => {
+    if (!measureOn) {
+      setMeasureIds((prev) => (prev.length === 0 ? prev : []));
+      setCutKeys((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    const visible = new Set((overviewGroups ?? []).flat().map((i) => i.id));
+    setMeasureIds((prev) => {
+      const next = prev.filter((id) => visible.has(id));
+      if (next.length !== prev.length) {
+        const live = new Set(spanEdges(next).map(([a, b]) => `${a}>${b}`));
+        setCutKeys((cut) => {
+          const pruned = cut.filter((k) => live.has(k));
+          return pruned.length === cut.length ? cut : pruned;
+        });
+      }
+      return next.length === prev.length ? prev : next;
+    });
+  }, [measureOn, overviewGroups]);
   const day = useMemo(() => {
     if (!trip?.days.length || dayIndex < 0) return null;
     const i = Math.min(dayIndex, trip.days.length - 1);
@@ -205,17 +273,120 @@ export function PlanPage() {
     setFocusId(item.id);
   }
 
-  const legFrom = legEditId ? items.find((i) => i.id === legEditId) : undefined;
-  const legTo =
-    legFrom && day
-      ? day.items[day.items.findIndex((i) => i.id === legFrom.id) + 1]
-      : undefined;
+  const legHit = (() => {
+    if (!legEditId || !trip) return null;
+    for (const d of trip.days) {
+      const i = d.items.findIndex((it) => it.id === legEditId);
+      if (i < 0) continue;
+      return { from: d.items[i]!, to: d.items[i + 1] };
+    }
+    return null;
+  })();
 
-  async function onPickLegMode(mode: TransportMode) {
-    if (!legFrom?.legToNext) return;
+  useEffect(() => {
+    const n = legHit?.from.legToNext?.durationMin;
+    setLegMinutes(n != null && n > 0 ? String(n) : "");
+  }, [legEditId, legHit?.from.legToNext?.durationMin]);
+
+  function openLeg(fromId: string) {
+    setSpanEdit(null);
+    setEditing(null);
+    setLegError(null);
+    setLegEditId(fromId);
+  }
+
+  function findItem(id: string) {
+    for (const d of trip?.days ?? []) {
+      const it = d.items.find((x) => x.id === id);
+      if (it) return it;
+    }
+    return undefined;
+  }
+
+  const spanHit =
+    spanEdit && trip
+      ? { from: findItem(spanEdit.fromId), to: findItem(spanEdit.toId), mode: spanEdit.mode }
+      : null;
+
+  function openSpan(fromId: string, toId: string, mode: string, durationMin: number | null) {
+    const picked = (LEG_MODES as string[]).includes(mode) ? (mode as TransportMode) : "drive";
+    setLegEditId(null);
+    setEditing(null);
+    setLegError(null);
+    setSpanEdit({ fromId, toId, mode: picked });
+    setLegMinutes(durationMin != null && durationMin > 0 ? String(durationMin) : "");
+  }
+
+  function cancelSpan(fromId: string, toId: string) {
+    const key = `${fromId}>${toId}`;
+    setSpanEdit((cur) => (cur && `${cur.fromId}>${cur.toId}` === key ? null : cur));
+    setMeasureIds((ids) => {
+      const next = nextMeasure(ids, cutKeys, key);
+      setCutKeys(next.cut);
+      return next.ids;
+    });
+  }
+
+  async function onPickSpanMode(mode: TransportMode) {
+    if (!spanHit?.from?.poi || !spanHit.to?.poi || !spanEdit) return;
     setLegBusy(true);
     setLegError(null);
-    const res = await updateLeg(legFrom.id, mode, writeOpts);
+    const res = await fetchRoute(
+      { lng: spanHit.from.poi.lng, lat: spanHit.from.poi.lat },
+      { lng: spanHit.to.poi.lng, lat: spanHit.to.poi.lat },
+      mode,
+    );
+    setLegBusy(false);
+    if (isErr(res)) {
+      setLegError(res.message || "更新失败");
+      return;
+    }
+    setSpanOverrides((prev) => ({
+      ...prev,
+      [`${spanEdit.fromId}>${spanEdit.toId}`]: { mode, durationMin: res.data.durationMin },
+    }));
+    setSpanEdit(null);
+  }
+
+  async function onPickLegMode(mode: TransportMode) {
+    if (!legHit?.from.legToNext) return;
+    setLegBusy(true);
+    setLegError(null);
+    const res = await updateLeg(legHit.from.id, mode, writeOpts);
+    setLegBusy(false);
+    if (isErr(res)) {
+      setLegError(res.message || "更新失败");
+      return;
+    }
+    onDayChange(res.data);
+    setLegEditId(null);
+  }
+
+  async function onSaveLegMinutes() {
+    if (spanEdit) {
+      const n = Number(legMinutes);
+      if (!Number.isInteger(n) || n < 1 || n > 60 * 48) {
+        setLegError("用时填 1–2880 的整数分钟");
+        return;
+      }
+      setSpanOverrides((prev) => ({
+        ...prev,
+        [`${spanEdit.fromId}>${spanEdit.toId}`]: { mode: spanEdit.mode, durationMin: n },
+      }));
+      setSpanEdit(null);
+      return;
+    }
+    const leg = legHit?.from.legToNext;
+    if (!legHit || !leg) return;
+    const n = Number(legMinutes);
+    if (!Number.isInteger(n) || n < 1 || n > 60 * 48) {
+      setLegError("用时填 1–2880 的整数分钟");
+      return;
+    }
+    const mode = (LEG_MODES as string[]).includes(leg.mode) ? (leg.mode as TransportMode) : "drive";
+    setLegBusy(true);
+    setLegError(null);
+    const res = await updateLeg(legHit.from.id, mode, writeOpts, n);
     setLegBusy(false);
     if (isErr(res)) {
       setLegError(res.message || "更新失败");
@@ -284,8 +455,8 @@ export function PlanPage() {
   }
 
   return (
-    <div className="relative flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden">
-      <div className="shrink-0 px-4 pb-2 pt-3">
+    <div className="plan-root relative flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden lg:h-auto lg:min-h-0 lg:flex-1">
+      <div className="plan-head shrink-0 px-4 pb-2 pt-3">
         <p className="text-center text-sm font-semibold tabular-nums">
           {overview ? "全程总览" : dayDate?.title}
           {!overview && dayWeather?.warn && (
@@ -295,7 +466,23 @@ export function PlanPage() {
           )}
         </p>
         {overview ? (
-          <p className="mt-0.5 text-center text-[11px] text-ink-muted">同色是同一天，点下面某一天去调整</p>
+          <p className="mt-0.5 text-center text-[11px] text-ink-muted">
+            {measureOn
+              ? "点标点测距。点线取消，点标签改信息"
+              : "各天路线 · 点圆点进入某一天"}
+            {measureOn && measureIds.length > 0 && (
+              <button
+                type="button"
+                className="ml-2 underline"
+                onClick={() => {
+                  setMeasureIds([]);
+                  setCutKeys([]);
+                }}
+              >
+                清除
+              </button>
+            )}
+          </p>
         ) : (
           <p className={`mt-0.5 text-center text-[11px] ${weatherLine.warn ? "text-warn" : "text-ink-muted"}`}>
             {weatherLine.text}
@@ -360,51 +547,68 @@ export function PlanPage() {
             })}
           </div>
         </div>
+        {urgentReminders.length > 0 && (
+          <div className="mt-2 border-t border-line pt-2">
+            <p className="mb-1 text-[11px] font-medium text-info">预约提醒</p>
+            <ul className="space-y-1">
+              {urgentReminders.slice(0, 3).map((r) => (
+                <li key={r.itemId} className="flex items-center gap-2 text-xs">
+                  <span
+                    className={`shrink-0 tabular-nums ${r.status === "overdue" ? "text-danger" : "text-info"}`}
+                  >
+                    {r.status === "overdue" ? `已过期 ${formatReminderWhen(r)}` : formatReminderWhen(r)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                  {r.bookUrl?.match(/^https?:\/\//i) ? (
+                    <a
+                      href={r.bookUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 text-accent-dark underline"
+                    >
+                      去预约
+                    </a>
+                  ) : r.bookUrl ? (
+                    <span className="max-w-[5.5rem] shrink-0 truncate text-ink-muted" title={r.bookUrl}>
+                      {r.bookUrl}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
-      {urgentReminders.length > 0 && (
-        <div className="shrink-0 border-b border-line px-4 py-2">
-          <p className="mb-1 text-[11px] font-medium text-info">预约提醒</p>
-          <ul className="space-y-1">
-            {urgentReminders.slice(0, 3).map((r) => (
-              <li key={r.itemId} className="flex items-center gap-2 text-xs">
-                <span
-                  className={`shrink-0 tabular-nums ${r.status === "overdue" ? "text-danger" : "text-info"}`}
-                >
-                  {r.status === "overdue" ? `已过期 ${formatReminderWhen(r)}` : formatReminderWhen(r)}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{r.title}</span>
-                {r.bookUrl?.match(/^https?:\/\//i) ? (
-                  <a
-                    href={r.bookUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 text-accent-dark underline"
-                  >
-                    去预约
-                  </a>
-                ) : r.bookUrl ? (
-                  <span className="max-w-[5.5rem] shrink-0 truncate text-ink-muted" title={r.bookUrl}>
-                    {r.bookUrl}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="relative z-0 min-h-0 flex-1 isolate">
+      <div className="plan-stage relative flex min-h-0 flex-1 flex-col">
+      <div className="plan-map relative z-0 min-h-0 flex-1 isolate">
         {overview && overviewGroups ? (
           <MapView
             groups={overviewGroups}
             pinNumber={(_item, _idx, group) => group + 1}
             showNames
+            showDayRoutes={showDayRoutes}
+            measureIds={measureOn ? measureIds : []}
             emptyHint="这次行程还没有带坐标的地点"
-            onSelectPoint={(id) => {
-              const i = trip.days.findIndex((d) => d.items.some((it) => it.id === id));
-              if (i >= 0) goDay(i);
-            }}
+            onSelectPoint={
+              measureOn
+                ? (id) =>
+                    setMeasureIds((prev) => {
+                      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+                      const live = new Set(spanEdges(next).map(([a, b]) => `${a}>${b}`));
+                      setCutKeys((cut) => {
+                        const pruned = cut.filter((k) => live.has(k));
+                        return pruned.length === cut.length ? cut : pruned;
+                      });
+                      return next;
+                    })
+                : undefined
+            }
+            onEditLeg={showDayRoutes ? openLeg : undefined}
+            spanOverrides={spanOverrides}
+            cutSpanKeys={cutKeys}
+            onEditSpan={openSpan}
+            onCancelSpan={cancelSpan}
             className="h-full w-full"
           />
         ) : day ? (
@@ -417,34 +621,68 @@ export function PlanPage() {
               const it = day.items[idx];
               if (it && idx >= 0) openItem(it, idx);
             }}
-            onEditLeg={(fromId) => {
-              setEditing(null);
-              setLegError(null);
-              setLegEditId(fromId);
-            }}
+            onEditLeg={openLeg}
             className="h-full w-full"
           />
         ) : null}
+        {overview && (
+          <div className="absolute right-3 top-3 z-20">
+            <div
+              className="relative grid grid-cols-2 rounded-full border border-line bg-bg/95 p-1 shadow-warm"
+              role="radiogroup"
+              aria-label="地图显示"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute bottom-1 top-1 rounded-full bg-accent-dark transition-transform duration-200 ease-out"
+                style={{
+                  width: "calc((100% - 8px) / 2)",
+                  left: 4,
+                  transform: `translateX(${OVERVIEW_MODES.findIndex(([id]) => id === overviewMode) * 100}%)`,
+                }}
+              />
+              {OVERVIEW_MODES.map(([id, label]) => {
+                const on = overviewMode === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => setOverviewMode(id)}
+                    className={`relative z-10 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[11px] font-medium ${
+                      on ? "text-white" : "text-ink-muted"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div
-        className="absolute inset-x-0 bottom-0 z-drawer mx-auto flex max-w-[480px] flex-col rounded-t-[20px] border border-b-0 border-line bg-bg shadow-warm"
+        className="plan-sheet absolute inset-x-0 bottom-0 z-drawer mx-auto flex max-w-[480px] flex-col rounded-t-[20px] border border-b-0 border-line bg-bg shadow-warm"
         style={{
           height: `${heightVh()}vh`,
           maxHeight: "calc(100% - 4rem)",
           transition: dragH == null ? "height 0.2s ease" : undefined,
         }}
       >
-        <div
-          className="shrink-0 cursor-grab touch-none select-none px-4 pb-1 pt-2"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          role="button"
-          aria-label="拖动调整目录高度"
-        >
-          <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-line" />
+        <div className="shrink-0 px-4 pb-1 pt-2">
+          <div
+            className="plan-grip cursor-grab touch-none select-none pb-1"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            role="button"
+            aria-label="拖动调整目录高度"
+          >
+            <div className="mx-auto h-1 w-9 rounded-full bg-line" />
+          </div>
           <p className="relative text-center text-sm font-semibold">
             {overview
               ? `全程 · ${trip.days.reduce((n, d) => n + d.items.length, 0)} 站`
@@ -509,6 +747,7 @@ export function PlanPage() {
             <div className="pt-3">
               <AddPlaceForm
                 day={day!}
+                tripDays={trip.days}
                 onDayChange={onDayChange}
                 onDone={() => setAddOpen(false)}
                 writeOpts={writeOpts}
@@ -529,6 +768,7 @@ export function PlanPage() {
           ))}
         </div>
       </div>
+      </div>
 
       {editing && day && (
         <ItemEditSheet
@@ -536,6 +776,7 @@ export function PlanPage() {
           item={editing.item}
           index={editing.index}
           tripId={trip.id}
+          tripDays={trip.days}
           onDayChange={(d) => {
             onDayChange(d);
             const idx = d.items.findIndex((x) => x.id === editing.item.id);
@@ -549,25 +790,29 @@ export function PlanPage() {
       )}
 
       <Sheet
-        open={!!legFrom?.legToNext}
+        open={!!legHit?.from.legToNext || !!spanHit?.from}
         onClose={() => {
           setLegEditId(null);
+          setSpanEdit(null);
           setLegError(null);
         }}
-        aria-label="更换交通方式"
+        aria-label="编辑这段路程"
       >
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-base font-semibold">更换交通方式</p>
+            <p className="text-base font-semibold">编辑这段路程</p>
             <p className="mt-0.5 truncate text-xs text-ink-muted">
-              {legFrom ? itemTitle(legFrom) : ""}
-              {legTo ? ` → ${itemTitle(legTo)}` : ""}
+              {spanHit?.from ? itemTitle(spanHit.from) : legHit ? itemTitle(legHit.from) : ""}
+              {spanHit?.to ? ` → ${itemTitle(spanHit.to)}` : legHit?.to ? ` → ${itemTitle(legHit.to)}` : ""}
             </p>
           </div>
           <button
             type="button"
             className="h-11 w-11 text-lg text-ink-muted"
-            onClick={() => setLegEditId(null)}
+            onClick={() => {
+              setLegEditId(null);
+              setSpanEdit(null);
+            }}
             aria-label="关闭"
           >
             ×
@@ -579,15 +824,30 @@ export function PlanPage() {
             <Button
               key={m}
               type="button"
-              variant={legFrom?.legToNext?.mode === m ? "primary" : "secondary"}
+              variant={(spanHit?.mode ?? legHit?.from.legToNext?.mode) === m ? "primary" : "secondary"}
               disabled={legBusy}
               className="min-w-[4.5rem]"
-              onClick={() => void onPickLegMode(m)}
+              onClick={() => void (spanHit ? onPickSpanMode(m) : onPickLegMode(m))}
             >
               {MODE_LABELS[m]}
             </Button>
           ))}
         </div>
+        <label className="mt-4 block text-xs text-ink-muted">
+          用时（分钟）
+          <input
+            type="number"
+            min={1}
+            max={2880}
+            inputMode="numeric"
+            className="mt-1 h-11 w-full rounded-btn bg-surface-2 px-3 text-sm outline-none"
+            value={legMinutes}
+            onChange={(e) => setLegMinutes(e.target.value)}
+          />
+        </label>
+        <Button type="button" className="mt-3 w-full" disabled={legBusy} onClick={() => void onSaveLegMinutes()}>
+          保存用时
+        </Button>
       </Sheet>
     </div>
   );

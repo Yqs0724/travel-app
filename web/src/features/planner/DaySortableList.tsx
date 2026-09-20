@@ -102,6 +102,7 @@ function SortRow({
             </span>
           ) : null}
         </span>
+        {item.mapHidden && <span className="shrink-0 text-[11px] text-ink-muted">已隐藏</span>}
         {item.needBook && <span className="shrink-0 text-[11px] text-info">预约</span>}
       </button>
     </li>

@@ -74,7 +74,7 @@ export function ReviewPage() {
   const cats = Object.entries(data.spendByCategory).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="px-4 pb-8 pt-2">
+    <div className="px-4 pb-8 pt-2 desk-read">
       <div className="mb-5">
         <p className="text-xs text-ink-muted">旅行回顾</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-accent-dark">
