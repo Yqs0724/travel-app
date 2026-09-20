@@ -17,7 +17,7 @@
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
 ### 当前状态（一句话）
-**可用个人版在 `NEW2`。** HEAD 仍是 `75f1b51`（Checkpoint the mobile planner before the desktop layout.）。其后的大屏布局、全程总览、点选测距、路线标签编辑都在**本地未提交**。线上 `114.132.103.15`（PM2 `triptrace`，端口 3003，目录 `/root/triptrace`）还是上次部署，**不含**这些改动。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
+**可用个人版在 `NEW2`。** HEAD **`6886149`**（大屏总览 / 地铁公交 / 本行程地点复用等已提交并 push）。线上 `114.132.103.15` PM2 `triptrace` :3003 **尚未**更新：本次部署 SSH 密码认证失败。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
 
 本地预览：仓库根 `npm run dev`。Vite `http://localhost:5173/` 把 `/api` 代理到 Fastify `127.0.0.1:3000`。常用预览行程 `cmu2b47mp0008v6s4scf2tibn`（成都，2026-10-03～10-09）。
 
