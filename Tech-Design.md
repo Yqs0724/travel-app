@@ -313,7 +313,8 @@ model ShareLink {
 |---|---|---|
 | POST | `/api/v1/ai/extract-pois` | 自由文本和/或截图 → 候选 POI（`mode=all|restaurants`；看图走多模态） |
 | POST | `/api/v1/ai/plan` | 按天草稿，**不落库**，确认后写入 |
-| POST | `/api/v1/ai/adjust` | 自然语言微调 → diff（**未实现**，规格保留） |
+| POST | `/api/v1/ai/adjust` | 自然语言微调 → diff（已实现） |
+| POST | `/api/v1/ai/chat` | 行程副驾驶对话（带本行程/清单上下文；`links` 跳转；`handoff` 可进提取/微调）。联网搜索未做 |
 
 ### 6.3 代付账本与结算
 

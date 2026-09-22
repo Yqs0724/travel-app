@@ -80,6 +80,7 @@ export async function checklistRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const parsed = z
       .object({
+        purchased: z.boolean().optional(),
         checked: z.boolean().optional(),
         name: z.string().min(1).max(80).optional(),
         category: z.string().max(20).optional(),

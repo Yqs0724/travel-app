@@ -85,3 +85,23 @@ export function applyAdjust(tripId: string, ops: AdjustOp[]) {
     body: JSON.stringify({ tripId, ops }),
   });
 }
+
+export type ChatLinkPage = "plan" | "checklist" | "budget" | "nearby" | "review";
+
+export type ChatReply = {
+  reply: string;
+  links: Array<{ label: string; page: ChatLinkPage }>;
+  handoff: "extract" | "adjust" | null;
+  source: "llm" | "rules";
+};
+
+export function chatTrip(
+  tripId: string,
+  message: string,
+  history?: Array<{ role: "user" | "assistant"; content: string }>,
+) {
+  return api<ChatReply>("/api/v1/ai/chat", {
+    method: "POST",
+    body: JSON.stringify({ tripId, message, history }),
+  });
+}

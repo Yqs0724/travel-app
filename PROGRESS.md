@@ -17,7 +17,7 @@
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
 ### 当前状态（一句话）
-**可用个人版在 `NEW2`。** HEAD **`6886149`**（大屏总览 / 地铁公交 / 本行程地点复用等已提交并 push）。线上 `114.132.103.15` PM2 `triptrace` :3003 **尚未**更新：本次部署 SSH 密码认证失败。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
+**可用个人版在 `NEW2`。** HEAD **`1e73cc5`**。线上 `114.132.103.15` PM2 `triptrace` :3003 **已部署**（含本地测试 `data.db`）。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
 
 本地预览：仓库根 `npm run dev`。Vite `http://localhost:5173/` 把 `/api` 代理到 Fastify `127.0.0.1:3000`。常用预览行程 `cmu2b47mp0008v6s4scf2tibn`（成都，2026-10-03～10-09）。
 
@@ -58,7 +58,7 @@
 
 单日页忽略总览滑块，永远画当天路线；点针仍打开编辑。总览目录行点击进入那一天。停留时刻已从行程 UI 拿掉，交通用时保留。当天地点可一键清空。删整趟行程在 `···` / 设置里，已有。
 
-AI 粘贴「4号 / 5号 / 然后」按日期分天（`ai.service` 的 `parseDayGroups`），只在本地，未部署。
+AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对话）。可问本行程与清单并带跳转；「行程助手 · 贴笔记」打开原提取流程；改行程走确认后写入。联网搜索后做。
 
 ### 提交注意
 未提交改动不要带上 `deploy/`（里面有服务器口令）和仓库根目录的 jpg。用户没说提交就不要提交，没说部署就不要部署。
@@ -137,7 +137,7 @@ AI 粘贴「4号 / 5号 / 然后」按日期分天（`ai.service` 的 `parseDayG
 
 按优先级，**都不是阻塞日常使用**：
 
-1. AI「自然语言微调」`/ai/adjust`（Tech-Design 有规格，**未实现**；现手改行程够用）
+1. AI 联网搜索（行程副驾驶已上；全网检索后做）
 2. 体验打磨 / 旅行回顾（PRD 更远）
 3. 用户若提新需求：先问是否 YAGNI，再动代码
 4. 若要上线：先提交 `NEW2`（排除 `deploy/`、jpg），`npm run build` 后再部署到 PM2 `triptrace` :3003。本地若用 `http://127.0.0.1:3000` 看打包结果，改完前端必须重新 `npm run build`，否则仍是旧 JS；开发请用 `http://localhost:5173`（Vite 热更新）。`server` 静态资源 `wildcard` 须为 true，否则 `/assets/*` 会回退成 `index.html` 导致白屏。不要覆盖 :3001 / :3002
@@ -154,7 +154,8 @@ AI 粘贴「4号 / 5号 / 然后」按日期分天（`ai.service` 的 `parseDayG
 | `web/src/features/planner/MapView.tsx` | 高德封装 |
 | `web/src/features/planner/DaySortableList.tsx` | 目录 + 参考价展示 |
 | `web/src/features/planner/ItemEditSheet.tsx` | 半屏编辑 + 周边入口 |
-| `web/src/features/ai/AiPlannerPanel.tsx` | AI 笔记/点评/截图 |
+| `web/src/features/ai/AiChatPanel.tsx` | AI 对话壳（历史 / 新对话 / 跳转） |
+| `web/src/features/ai/AiPlannerPanel.tsx` | 行程助手：笔记/点评/截图提取 |
 | `web/src/features/budget/ExpensePanel.tsx` | 我的代付账本 UI |
 | `web/src/features/budget/AaTicket.tsx` + `aaExport.ts` | AA 热敏小票 + 导出 |
 | `web/src/features/budget/AaShareView.tsx` | `/share/:token` 的 AA 分支 |

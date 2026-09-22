@@ -105,13 +105,16 @@ model ExpenseSplit {
 }
 
 model ChecklistItem {
-  id       String  @id @default(cuid())
-  tripId   String
-  category String
-  name     String
-  checked  Boolean @default(false)
-  source   String  @default("custom")
-  trip     Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  id         String  @id @default(cuid())
+  tripId     String
+  category   String
+  name       String
+  /** 已购买 */
+  purchased  Boolean @default(false)
+  /** 已携带（原 checked） */
+  checked    Boolean @default(false)
+  source     String  @default("custom")
+  trip       Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 
 model ShareLink {

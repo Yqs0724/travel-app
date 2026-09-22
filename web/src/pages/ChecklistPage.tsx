@@ -14,6 +14,8 @@ import { isErr } from "@/api/client";
 import { Button } from "@/components/Button";
 import { IconCloud, IconPlus } from "@/components/Icons";
 
+type Mode = "buy" | "pack";
+
 export function ChecklistPage() {
   const { id } = useParams<{ id: string }>();
   const [items, setItems] = useState<ChecklistItem[]>([]);
@@ -21,6 +23,7 @@ export function ChecklistPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
+  const [mode, setMode] = useState<Mode>("buy");
   /** 建议默认收起，避免占满手机屏 */
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -44,10 +47,14 @@ export function ChecklistPage() {
     void reloadSuggestions(id);
   }, [id]);
 
-  const done = items.filter((i) => i.checked).length;
+  const doneInMode = items.filter((i) => (mode === "buy" ? i.purchased : i.checked)).length;
 
   async function onToggle(it: ChecklistItem) {
-    await apply(await patchChecklistItem(it.id, { checked: !it.checked }));
+    if (mode === "buy") {
+      await apply(await patchChecklistItem(it.id, { purchased: !it.purchased }));
+    } else {
+      await apply(await patchChecklistItem(it.id, { checked: !it.checked }));
+    }
   }
 
   async function onDelete(it: ChecklistItem) {
@@ -151,50 +158,107 @@ export function ChecklistPage() {
         </div>
       )}
 
-      {items.length > 0 && (
-        <p className="mt-3 text-sm text-ink-muted">
-          已勾 {done} / {items.length}
-        </p>
-      )}
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
 
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-
-      <ul className="mt-3 space-y-2">
-        {items.map((it) => (
-          <li key={it.id} className="flex items-center gap-2 rounded-card border border-line bg-surface px-2 shadow-warm">
-            <button
-              type="button"
-              aria-label={it.checked ? "取消勾选" : "勾选"}
-              onClick={() => void onToggle(it)}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center`}
-            >
-              <span
-                className={`flex h-6 w-6 items-center justify-center rounded-[6px] border text-sm ${
-                  it.checked ? "border-ok bg-ok text-white" : "border-line bg-surface-2"
-                }`}
-              >
-                {it.checked ? "✓" : ""}
-              </span>
-            </button>
+      <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface shadow-warm">
+        <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+          <p className="text-sm text-ink-muted">
+            {items.length > 0 ? `完成 ${doneInMode} / ${items.length}` : "还没有物品"}
+          </p>
+          <div
+            className="relative flex h-7 w-[5.5rem] shrink-0 rounded-full bg-surface-2 p-0.5"
+            role="tablist"
+            aria-label="清单模式"
+          >
             <span
-              className={`min-w-0 flex-1 text-[15px] ${it.checked ? "text-ink-muted line-through" : ""}`}
-            >
-              {it.name}
-              {it.source === "suggest" && (
-                <span className="ml-1 text-[11px] font-normal text-ink-muted">建议</span>
-              )}
-            </span>
+              className="pointer-events-none absolute bottom-0.5 top-0.5 w-[calc(50%-2px)] rounded-full bg-bg shadow-sm transition-transform duration-200 ease-out"
+              style={{ transform: mode === "pack" ? "translateX(100%)" : "translateX(0)" }}
+              aria-hidden
+            />
             <button
               type="button"
-              aria-label="删除"
-              className="flex h-11 w-11 shrink-0 items-center justify-center text-lg leading-none text-ink-muted"
-              onClick={() => void onDelete(it)}
+              role="tab"
+              aria-selected={mode === "buy"}
+              className={`relative z-10 flex-1 text-[11px] ${
+                mode === "buy" ? "font-medium text-accent-dark" : "text-ink-muted"
+              }`}
+              onClick={() => setMode("buy")}
             >
-              ×
+              采购
             </button>
-          </li>
-        ))}
-      </ul>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "pack"}
+              className={`relative z-10 flex-1 text-[11px] ${
+                mode === "pack" ? "font-medium text-accent-dark" : "text-ink-muted"
+              }`}
+              onClick={() => setMode("pack")}
+            >
+              打包
+            </button>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-ink-muted">先在上方添加，或展开建议加入</p>
+        ) : (
+          <ul>
+            {items.map((it, i) => {
+              const on = mode === "buy" ? it.purchased : it.checked;
+              return (
+                <li
+                  key={it.id}
+                  className={`flex items-center gap-2 px-2 ${
+                    i > 0 ? "border-t border-line" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-label={
+                      mode === "buy"
+                        ? on
+                          ? "取消已购买"
+                          : "标记已购买"
+                        : on
+                          ? "取消已携带"
+                          : "标记已携带"
+                    }
+                    onClick={() => void onToggle(it)}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center"
+                  >
+                    <span
+                      className={`flex h-6 w-6 items-center justify-center rounded-[6px] border text-sm ${
+                        on ? "border-ok bg-ok text-white" : "border-line bg-surface-2"
+                      }`}
+                    >
+                      {on ? "✓" : ""}
+                    </span>
+                  </button>
+                  <span
+                    className={`min-w-0 flex-1 text-[15px] ${
+                      on ? "text-ink-muted line-through" : ""
+                    }`}
+                  >
+                    {it.name}
+                    {it.source === "suggest" && (
+                      <span className="ml-1 text-[11px] font-normal text-ink-muted">建议</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="删除"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center text-lg leading-none text-ink-muted"
+                    onClick={() => void onDelete(it)}
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

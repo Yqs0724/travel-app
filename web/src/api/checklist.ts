@@ -5,6 +5,7 @@ export type ChecklistItem = {
   tripId: string;
   category: string;
   name: string;
+  purchased: boolean;
   checked: boolean;
   source: string;
 };
@@ -33,7 +34,10 @@ export function addChecklistItem(tripId: string, name: string, category?: string
   });
 }
 
-export function patchChecklistItem(id: string, body: { checked?: boolean; name?: string }) {
+export function patchChecklistItem(
+  id: string,
+  body: { purchased?: boolean; checked?: boolean; name?: string },
+) {
   return api<ChecklistItem[]>(`/api/v1/checklist-items/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),

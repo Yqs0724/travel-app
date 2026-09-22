@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../lib/response.js";
 import * as ai from "../services/ai.service.js";
+import * as aiChat from "../services/ai.chat.js";
 import { bumpEditVersion } from "../services/planner.service.js";
 
 function sendErr(reply: { status: (c: number) => { send: (b: unknown) => unknown } }, e: unknown) {
@@ -153,6 +154,32 @@ export async function aiRoutes(app: FastifyInstance) {
     try {
       await bumpEditVersion(parsed.data.tripId);
       return ok(await ai.applyAdjust(parsed.data.tripId, parsed.data.ops));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.post("/api/v1/ai/chat", async (req, reply) => {
+    const parsed = z
+      .object({
+        tripId: z.string().min(1),
+        message: z.string().min(1).max(4000),
+        history: z
+          .array(
+            z.object({
+              role: z.enum(["user", "assistant"]),
+              content: z.string().max(4000),
+            }),
+          )
+          .max(12)
+          .optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      return ok(
+        await aiChat.chatAboutTrip(parsed.data.tripId, parsed.data.message, parsed.data.history ?? []),
+      );
     } catch (e) {
       return sendErr(reply, e);
     }

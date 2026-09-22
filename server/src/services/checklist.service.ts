@@ -12,7 +12,7 @@ export async function listItems(tripId: string) {
   if (!trip) throw Object.assign(new Error("行程不存在"), { code: 40003 });
   return prisma.checklistItem.findMany({
     where: { tripId },
-    orderBy: [{ checked: "asc" }, { id: "asc" }],
+    orderBy: [{ purchased: "asc" }, { checked: "asc" }, { id: "asc" }],
   });
 }
 
@@ -57,13 +57,14 @@ export async function addCustom(tripId: string, name: string, category: string) 
 
 export async function patchItem(
   id: string,
-  data: { checked?: boolean; name?: string; category?: string },
+  data: { purchased?: boolean; checked?: boolean; name?: string; category?: string },
 ) {
   const item = await prisma.checklistItem.findUnique({ where: { id } });
   if (!item) throw Object.assign(new Error("清单项不存在"), { code: 40003 });
   await prisma.checklistItem.update({
     where: { id },
     data: {
+      purchased: data.purchased,
       checked: data.checked,
       name: data.name?.trim(),
       category: data.category?.trim(),
