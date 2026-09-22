@@ -17,7 +17,7 @@
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
 ### 当前状态（一句话）
-**可用个人版在 `NEW2`。** HEAD **`1e73cc5`**。线上 `114.132.103.15` PM2 `triptrace` :3003 **已部署**（含本地测试 `data.db`）。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
+**可用个人版在 `NEW2`。** HEAD **`54e5809`**。线上 `114.132.103.15` PM2 `triptrace` :3003 **已部署**（保留服务器现有 `data.db`，schema 已 push）。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
 
 本地预览：仓库根 `npm run dev`。Vite `http://localhost:5173/` 把 `/api` 代理到 Fastify `127.0.0.1:3000`。常用预览行程 `cmu2b47mp0008v6s4scf2tibn`（成都，2026-10-03～10-09）。
 
