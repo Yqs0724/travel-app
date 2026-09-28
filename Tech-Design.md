@@ -203,8 +203,10 @@ model ItineraryItem {
   ticketPrice Float?       // 门票估价：仅行程参考展示，禁止写入 Expense
   needBook  Boolean  @default(false)
   bookAheadDays Int?
+  bookRemindAt String?       // YYYY-MM-DDTHH:mm，有则优先于 bookAheadDays
   bookUrl   String?
   note      String?
+  mapHidden Boolean @default(false) // 地图不画该点；前后仍连线
   day       TripDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
   legToNext TransportLeg?
 }
@@ -254,13 +256,14 @@ model ExpenseSplit {
 }
 
 model ChecklistItem {
-  id       String  @id @default(cuid())
-  tripId   String
-  category String            // 证件/衣物/电子/药品/违禁品自查...
-  name     String
-  checked  Boolean @default(false)
-  source   String  @default("custom") // template/ai/custom
-  trip     Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  id         String  @id @default(cuid())
+  tripId     String
+  category   String            // 证件/衣物/电子/药品/违禁品自查...
+  name       String
+  purchased  Boolean @default(false) // 已购买（采购视图）
+  checked    Boolean @default(false) // 已携带（打包视图）
+  source     String  @default("custom") // template/ai/custom
+  trip       Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 
 model ShareLink {

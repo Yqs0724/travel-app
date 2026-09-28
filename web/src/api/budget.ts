@@ -109,6 +109,64 @@ export function getBudgetSummary(tripId: string, opts?: ApiOpts) {
   return api<BudgetSummary>(`/api/v1/trips/${tripId}/budget-summary`, {}, opts);
 }
 
+/** 预计花费条目（预算）；implanted 后仍保留，不删行 */
+export type BudgetPlanItem = {
+  id: string;
+  tripId: string;
+  name: string;
+  /** 账单总额 */
+  amount: number;
+  implanted: boolean;
+  /** 已入账时「我」承担；未入账为 null */
+  myShare: number | null;
+  /** 共同分摊朋友数 */
+  friendCount: number;
+};
+
+/** 预算合计用：已入账共同用 myShare，否则用 amount */
+export function planMyAmount(it: BudgetPlanItem) {
+  if (it.implanted && it.myShare != null) return it.myShare;
+  return it.amount;
+}
+
+export function listBudgetPlans(tripId: string, opts?: ApiOpts) {
+  return api<BudgetPlanItem[]>(`/api/v1/trips/${tripId}/budget-plans`, {}, opts);
+}
+
+export function addBudgetPlan(
+  tripId: string,
+  body: { name: string; amount: number },
+  opts?: ApiOpts,
+) {
+  return api<BudgetPlanItem[]>(`/api/v1/trips/${tripId}/budget-plans`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  }, opts);
+}
+
+export function updateBudgetPlan(
+  id: string,
+  body: { name?: string; amount?: number },
+  opts?: ApiOpts,
+) {
+  return api<BudgetPlanItem[]>(`/api/v1/budget-plans/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }, opts);
+}
+
+export function deleteBudgetPlan(id: string, opts?: ApiOpts) {
+  return api<BudgetPlanItem[]>(`/api/v1/budget-plans/${id}`, { method: "DELETE" }, opts);
+}
+
+/** 预算植入实付；friends 为空=个人支出 */
+export function implantBudgetPlan(id: string, friends: string[] = [], opts?: ApiOpts) {
+  return api<BudgetPlanItem[]>(`/api/v1/budget-plans/${id}/implant`, {
+    method: "POST",
+    body: JSON.stringify({ friends }),
+  }, opts);
+}
+
 export function yuan(n: number) {
   return `¥${n.toFixed(2)}`;
 }

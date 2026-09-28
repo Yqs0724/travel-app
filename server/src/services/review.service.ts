@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma.js";
+import { planMyAmount } from "./budget.service.js";
 
 export type TripReview = {
   tripId: string;
@@ -9,9 +10,20 @@ export type TripReview = {
   stopCount: number;
   legDistanceKm: number | null;
   legDurationMin: number | null;
-  spendTotal: number;
+  /** 我承担（分摊后） */
+  mySpend: number;
+  /** 我掏出去的账单合计（含代付朋友份） */
+  paidOut: number;
   spendByCategory: Record<string, number>;
   othersOweMe: number;
+  budget: {
+    /** 预算按「我付」合计 */
+    planMine: number;
+    /** 未入账账单额合计 */
+    openBill: number;
+    openCount: number;
+    doneCount: number;
+  } | null;
   days: Array<{
     date: string;
     stops: Array<{ name: string; startTime: string | null }>;
@@ -33,6 +45,43 @@ function itemName(it: { customName: string | null; poi: { name: string } | null 
   return it.poi?.name || it.customName || "未命名";
 }
 
+function memberShare(
+  amount: number,
+  splits: Array<{ member: string; ratio: number }>,
+  member: string,
+): number {
+  const ratioSum = splits.reduce((s, x) => s + x.ratio, 0);
+  if (ratioSum <= 0) return 0;
+  const mine = splits.find((s) => s.member === member)?.ratio ?? 0;
+  return (amount * mine) / ratioSum;
+}
+
+export function buildReviewSummaryText(r: TripReview): string {
+  const lines: string[] = [];
+  lines.push(`${r.title}`);
+  lines.push(
+    r.startDate === r.endDate ? r.startDate : `${r.startDate} → ${r.endDate}`,
+  );
+  const bits = [`${r.dayCount} 天`, `${r.stopCount} 站`];
+  if (r.legDistanceKm != null) bits.push(`${r.legDistanceKm} km`);
+  lines.push(bits.join(" · "));
+  lines.push(`我承担 ¥${r.mySpend.toFixed(2)}`);
+  if (r.othersOweMe > 0) lines.push(`朋友应付我 ¥${r.othersOweMe.toFixed(2)}`);
+  if (r.budget && (r.budget.openCount > 0 || r.budget.doneCount > 0)) {
+    lines.push(`预算（我付）¥${r.budget.planMine.toFixed(2)}`);
+    if (r.budget.openCount > 0) {
+      lines.push(`未入账 ¥${r.budget.openBill.toFixed(2)}`);
+    }
+  }
+  lines.push("");
+  r.days.forEach((d, i) => {
+    lines.push(`第 ${i + 1} 天 · ${d.date.slice(5)}`);
+    if (d.stops.length === 0) lines.push("  （空）");
+    else d.stops.forEach((s) => lines.push(`  · ${s.name}`));
+  });
+  return lines.join("\n");
+}
+
 export async function getTripReview(tripId: string): Promise<TripReview | null> {
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
@@ -50,6 +99,7 @@ export async function getTripReview(tripId: string): Promise<TripReview | null> 
         orderBy: { date: "asc" },
         include: { splits: true },
       },
+      budgetPlans: { orderBy: [{ implanted: "asc" }, { id: "asc" }] },
     },
   });
   if (!trip) return null;
@@ -82,18 +132,18 @@ export async function getTripReview(tripId: string): Promise<TripReview | null> 
   });
 
   const spendByCategory: Record<string, number> = {};
-  let spendTotal = 0;
+  let mySpend = 0;
+  let paidOut = 0;
   let othersOweMe = 0;
   const photos: TripReview["photos"] = [];
+  const me = "我";
 
   for (const e of trip.expenses) {
-    spendTotal += e.amount;
-    spendByCategory[e.category] = (spendByCategory[e.category] ?? 0) + e.amount;
-    const mySplit = e.splits.find((s) => s.member === "我");
-    const myRatio = mySplit?.ratio ?? 0;
-    const ratioSum = e.splits.reduce((a, s) => a + s.ratio, 0) || 1;
-    const myShare = e.amount * (myRatio / ratioSum);
-    othersOweMe += Math.max(0, e.amount - myShare);
+    paidOut += e.amount;
+    const mine = memberShare(e.amount, e.splits, me);
+    mySpend += mine;
+    othersOweMe += Math.max(0, e.amount - mine);
+    spendByCategory[e.category] = (spendByCategory[e.category] ?? 0) + mine;
     if (e.receiptExt) {
       photos.push({
         expenseId: e.id,
@@ -105,6 +155,32 @@ export async function getTripReview(tripId: string): Promise<TripReview | null> 
     }
   }
 
+  for (const k of Object.keys(spendByCategory)) {
+    spendByCategory[k] = Math.round(spendByCategory[k] * 100) / 100;
+  }
+
+  let budget: TripReview["budget"] = null;
+  if (trip.budgetPlans.length > 0) {
+    let planMine = 0;
+    let openBill = 0;
+    let openCount = 0;
+    let doneCount = 0;
+    for (const p of trip.budgetPlans) {
+      planMine += planMyAmount(p);
+      if (p.implanted) doneCount += 1;
+      else {
+        openCount += 1;
+        openBill += p.amount;
+      }
+    }
+    budget = {
+      planMine: Math.round(planMine * 100) / 100,
+      openBill: Math.round(openBill * 100) / 100,
+      openCount,
+      doneCount,
+    };
+  }
+
   return {
     tripId: trip.id,
     title: trip.title,
@@ -114,9 +190,11 @@ export async function getTripReview(tripId: string): Promise<TripReview | null> 
     stopCount,
     legDistanceKm: hasDist ? Math.round((distM / 1000) * 10) / 10 : null,
     legDurationMin: hasDur ? durMin : null,
-    spendTotal: Math.round(spendTotal * 100) / 100,
+    mySpend: Math.round(mySpend * 100) / 100,
+    paidOut: Math.round(paidOut * 100) / 100,
     spendByCategory,
     othersOweMe: Math.round(othersOweMe * 100) / 100,
+    budget,
     days,
     photos,
   };

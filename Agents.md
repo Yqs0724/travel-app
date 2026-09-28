@@ -1,7 +1,7 @@
 # 行迹 TripTrace · AI 编程助手规则
 
 > 给 Cursor 用。改代码前读本文件 + [PRD.md](./PRD.md) + [Tech-Design.md](./Tech-Design.md) + [UI-design.md](./UI-design.md) + [PROGRESS.md](./PROGRESS.md)。
-> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → UI-design 定长什么样 → 本文件定怎么写代码。设计文档已于 2026-09-19 对齐全程总览和大屏；未提交的进度以 [PROGRESS.md](./PROGRESS.md) §0 为准。
+> 冲突时：PRD 定做什么 → Tech-Design 定怎么做 → UI-design 定长什么样 → 本文件定怎么写代码。设计文档与进度以 [PROGRESS.md](./PROGRESS.md) §0 为准（含 NEW2 已提交/已部署状态）。
 > 行程主视图：**地图 + 切日点阵（第 0 点是全程总览）+ 目录**。手机地图在上、目录在下；`lg`≥1024 左目录、右带框地图。无独立地图 Tab、无蛇形时间轴。
 
 ---
@@ -138,7 +138,7 @@ IndexedDB（`idb`）只缓存已加载行程详情，供弱网**查看**。写�
 5. 本地：`npm run dev`（web 5173，server 3000，Vite 代理 `/api`）。不要把 Key 写进命令行历史能看到的文档。
 6. 提交前：类型能过、手动路径能用、`.env` 未入库。
 
-V1.0 已落地主线。当前分支 `NEW2`，HEAD `75f1b51` 之后的大屏和全程总览还在工作区。接续先读 **PROGRESS.md §0**。
+V1.0 已落地主线。当前分支 `NEW2`，HEAD 与线上状态见 **PROGRESS.md §0**（勿再假定停在 `75f1b51` 工作区未提交）。接续先读 **PROGRESS.md §0**。
 
 ---
 

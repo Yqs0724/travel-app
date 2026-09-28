@@ -1,6 +1,6 @@
 # 行迹 TripTrace · 项目进度交接
 
-> 日期：**2026-09-19** ｜ 形态：个人自用 Web（手机优先，`lg`≥1024 大屏）  
+> 日期：**2026-09-28** ｜ 形态：个人自用 Web（手机优先，`lg`≥1024 大屏）  
 > 文档：`PRD.md` / `Tech-Design.md` / `UI-design.md` / `Agents.md`  
 > GitHub：https://github.com/Yqs0724/travel-app （当前分支 **`NEW2`**，跟踪 `origin/NEW2`；本地 `.env` **不**入库）
 
@@ -17,9 +17,20 @@
 3. **Windows**：PowerShell 不要用 `&&` 串命令；`prisma generate` 若 EPERM，先停掉占用 `server` 的 node 再生成。
 
 ### 当前状态（一句话）
-**可用个人版在 `NEW2`。** HEAD **`54e5809`**。线上 `114.132.103.15` PM2 `triptrace` :3003 **已部署**（保留服务器现有 `data.db`，schema 已 push）。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
+**可用个人版在 `NEW2`。** HEAD **`c2dbe6b`**（说明部署的 commit；功能主体在 **`54e5809`** / **`6886149`**）。线上 `114.132.103.15` PM2 `triptrace` **:3003 已部署**（最近一次部署保留服务器已有 `data.db`，并对 schema 做了 `db:push`）。不要动 Docker `ai-phone:3001` 和 PM2 `trip:3002`。
 
 本地预览：仓库根 `npm run dev`。Vite `http://localhost:5173/` 把 `/api` 代理到 Fastify `127.0.0.1:3000`。常用预览行程 `cmu2b47mp0008v6s4scf2tibn`（成都，2026-10-03～10-09）。
+
+### NEW2 自 `75f1b51` 以来已入库的主要变更（事实清单）
+| Commit | 内容（以 commit 为准） |
+|---|---|
+| `6886149` | 大屏/全程总览、点选测距、`mapHidden`、公交/地铁 `transit/integrated`、本行程地点复用、添加地点 Enter 默认搜索 |
+| `54e5809` | AI 行程副驾驶对话（`/ai/chat` + `AiChatPanel`）、清单 `purchased` + 采购/打包滑块 UI |
+| `1e73cc5` / `c2dbe6b` | 部署相关说明性提交 |
+
+工作区当前**未入库**：
+- 刚同步的文档：`PROGRESS.md` / `Agents.md` / `Tech-Design.md`（本轮交接改动，**尚未 commit/push**）
+- 切勿提交：`deploy/`（含服务器口令）、仓库根目录若干 jpg、`web/tsconfig.tsbuildinfo`
 
 ### 最近定稿决策（勿回退）
 | 主题 | 定稿 |
@@ -33,7 +44,9 @@
 | 地图 | 见下方「地图定稿」。不要把已经删掉的模式加回来 |
 | 底栏 | 手机底栏五项。大屏（`lg`）同一套 Tab 挪到顶栏右侧，旁边是「设置」（手机仍是 `···`「更多」） |
 | 周边 | 锚点可选；关键词自搜；芯片餐饮/玩乐/厕所；半屏「周边」「找厕所」带 `itemId`+`mode` |
-| AI | 笔记→草稿写入；点评→仅候选复制；可上传截图看图（多模态 LLM，如 `deepseek-flash`） |
+| AI | **对话壳为主**（历史 / 新对话 / 对话框）；可问本行程与清单并带页面跳转；「行程助手 · 贴笔记」打开原提取流程；自然语言改行程走 `/ai/adjust` 确认后写入。**联网搜索未做**（已明确后做）。用户曾问微信/短信预约推送，**决定不做** |
+| 清单 | 两字段：`purchased`（已购）与 `checked`（已带）。UI：列表卡片右上角小滑块切 **采购 / 打包**；文案 **完成 N / 总数**，不展示另一模式计数 |
+| 添加地点 | 输入框 Enter **默认搜 POI**，不直接加无坐标名称；可从「本行程地点」复用带坐标 POI |
 
 ### 地图定稿（2026-09-19，勿回退）
 
@@ -58,13 +71,13 @@
 
 单日页忽略总览滑块，永远画当天路线；点针仍打开编辑。总览目录行点击进入那一天。停留时刻已从行程 UI 拿掉，交通用时保留。当天地点可一键清空。删整趟行程在 `···` / 设置里，已有。
 
-AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对话）。可问本行程与清单并带跳转；「行程助手 · 贴笔记」打开原提取流程；改行程走确认后写入。联网搜索后做。
+AI 粘贴「4号 / 5号 / 然后」按日期分天：`ai.service` 的 `parseDayGroups`（已在代码中；随 NEW2 部署一并在线上）。
 
 ### 提交注意
 未提交改动不要带上 `deploy/`（里面有服务器口令）和仓库根目录的 jpg。用户没说提交就不要提交，没说部署就不要部署。
 
 ### 新窗口建议首句（可粘贴）
-> 继续开发行迹 TripTrace（`d:\cursor-projects\旅游app`，分支 `NEW2`）。先读 `PROGRESS.md` §0 与 `Agents.md`。大屏布局和全程总览（当天路线 / 点选测距）已在本地，未提交、未部署。不要恢复外围连线、全部落点、估价→账单同步。记账保持「我的代付账本」。不要提交 `deploy/` 和根目录 jpg。本地 `.env` 已有。
+> 继续开发行迹 TripTrace（`d:\cursor-projects\旅游app`，分支 `NEW2`）。先读 `PROGRESS.md` §0 与 `Agents.md`。远程 HEAD `c2dbe6b`，线上 `triptrace` :3003 已部署。本地还有未提交的文档同步（`PROGRESS.md` / `Agents.md` / `Tech-Design.md`）。不要恢复外围连线、全部落点、估价→账单同步。记账保持「我的代付账本」。AI 联网搜索未做；预约不接微信/短信推送。不要提交 `deploy/` 和根目录 jpg。本地 `.env` 已有。
 
 ---
 
@@ -98,18 +111,22 @@ AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对�
 - [x] Prisma 全量 schema；JWT；`{ code, data, message }`；Vite `127.0.0.1`
 - [x] 顶栏行程切换 + `···`；底栏 **行程 / 周边 / AI / 清单 / 记账**
 - [x] 行程 Tab：切日点阵（含全程总览）+ MapView + 目录。手机：地图上、抽屉下。大屏：左目录、右带框地图；顶栏右侧是 Tab +「设置」
-- [x] 当天路线 / 点选测距；路线标签改交通和用时；测距线可点掉。细节见 §0，代码主要在 `PlanPage.tsx` 与 `MapView.tsx`（未提交）
+- [x] 当天路线 / 点选测距；路线标签改交通和用时；测距线可点掉；`mapHidden`。细节见 §0，代码主要在 `PlanPage.tsx` 与 `MapView.tsx`（**已在 NEW2 提交并部署**）
 - [x] 周边 Tab：关键词搜 / 锚点餐饮·玩乐·厕所；`proxy/amap/around`
-- [x] AI：笔记提取 → 勾选 → 草稿 → 确认写入；点评仅候选；可截图看图；地理分天在后端，禁止 LLM 算距离
+- [x] AI 行程助手：笔记提取 → 勾选 → 草稿 → 确认写入；点评仅候选；可截图看图；地理分天在后端，禁止 LLM 算距离
+- [x] AI 对话壳：`AiChatPanel` + `POST /api/v1/ai/chat`（本行程/清单上下文、跳转 `links`、`handoff` 提取/微调）；历史存在浏览器 localStorage；微调走 `/ai/adjust` + 确认应用
+- [x] 路径：`walk`/`drive`/`bike` + `subway`/`transit`（公交综合规划）；默认新建路段驾车
 
 ### 2.5 清单 / 记账（代付账本）
 - [x] 清单：扁平列表 + 常用套装；天气/行程智能推荐已接
+- [x] 清单双状态：`purchased` / `checked`；采购·打包小滑块；完成计数文案见 UI-design §5.7
 - [x] 记账：`ExpensePanel` = 我的支出列表 + 共同开关 + 朋友应付我；可编辑、可附图
 - [x] 同行人：`MembersEditor` 只管朋友；结算 `settlement.ts` 净额法
 
 ### 2.6 外部代理
 - [x] `/api/v1/proxy/amap/poi`、`/route`、`/around`（无 Key → 502，手动路径仍可用）
-- [x] 天气 / 预约提醒 / **当天实时路况** 图层
+- [x] 天气 / 预约提醒（**应用内待办列表**）/ **当天实时路况** 图层  
+  - 说明：预约**未**接微信/短信/电话推送（讨论后决定不做）
 
 ### 2.7 分享
 - [x] 行程只读分享：`POST .../share` → `/share/:token`（无账单/清单/成员）
@@ -129,7 +146,9 @@ AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对�
 | 5 | 地图封装 | 禁止业务里直接 `new AMap`；只改 `MapView.tsx` |
 | 6 | AA 色板 | 小票 hex 是刻意例外；主应用仍只用 `:root` token |
 | 7 | 地图色 | `MapView` 里的针色、测距白线、选中蓝圈是地图绘制，不要为了「JSX 禁止 hex」改回高德默认蓝 |
-| 8 | 未提交 | 大屏和总览在工作区，不在 `75f1b51`。部署前先提交；提交时排除 `deploy/` 和根目录 jpg |
+| 8 | 部署包 | `deploy/upload_and_start.py` **不打包** `*.db`；默认保留服务器 `data.db`。需要同步本地库时须单独上传（曾做过一次本地库上传；最近一次部署未再覆盖库） |
+| 9 | 静态 wildcard | `server` 托管 `web/dist` 时 `wildcard` 须为 true，否则 `/assets/*` 回退成 HTML 白屏 |
+| 10 | 勿提交 | `deploy/`、根目录 jpg；用户未要求不要提交/部署 |
 
 ---
 
@@ -137,10 +156,10 @@ AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对�
 
 按优先级，**都不是阻塞日常使用**：
 
-1. AI 联网搜索（行程副驾驶已上；全网检索后做）
-2. 体验打磨 / 旅行回顾（PRD 更远）
+1. AI **联网搜索**（副驾驶对话已上；全网检索明确后做）
+2. ~~旅行回顾~~：**已有**（`···` / 设置 → 旅行回顾）：路线 + 我承担 + 预算对照 + 附图 + 复制摘要
 3. 用户若提新需求：先问是否 YAGNI，再动代码
-4. 若要上线：先提交 `NEW2`（排除 `deploy/`、jpg），`npm run build` 后再部署到 PM2 `triptrace` :3003。本地若用 `http://127.0.0.1:3000` 看打包结果，改完前端必须重新 `npm run build`，否则仍是旧 JS；开发请用 `http://localhost:5173`（Vite 热更新）。`server` 静态资源 `wildcard` 须为 true，否则 `/assets/*` 会回退成 `index.html` 导致白屏。不要覆盖 :3001 / :3002
+4. 再次上线：提交 `NEW2`（排除 `deploy/`、jpg）→ `npm run build` 或跑 `deploy/upload_and_start.py` → PM2 `triptrace` :3003。本地看打包结果用 `:3000` 时改完前端必须重新 build；开发用 `5173`。不要覆盖 :3001 / :3002
 
 ---
 
@@ -153,19 +172,28 @@ AI Tab 为对话壳（桌面左侧历史+新对话；手机顶栏历史/新对�
 | `web/src/features/nearby/NearbyPanel.tsx` | 周边搜索 / 厕所 / 加入 |
 | `web/src/features/planner/MapView.tsx` | 高德封装 |
 | `web/src/features/planner/DaySortableList.tsx` | 目录 + 参考价展示 |
-| `web/src/features/planner/ItemEditSheet.tsx` | 半屏编辑 + 周边入口 |
+| `web/src/features/planner/ItemEditSheet.tsx` | 半屏编辑 + 周边入口 + 补坐标 |
+| `web/src/features/planner/AddPlaceForm.tsx` | 添加地点；Enter 搜索；本行程地点 |
+| `web/src/features/planner/tripPois.ts` | 本行程 POI 去重 |
 | `web/src/features/ai/AiChatPanel.tsx` | AI 对话壳（历史 / 新对话 / 跳转） |
+| `web/src/features/ai/chatHistory.ts` | 对话历史 localStorage |
 | `web/src/features/ai/AiPlannerPanel.tsx` | 行程助手：笔记/点评/截图提取 |
+| `web/src/pages/ChecklistPage.tsx` | 清单；采购/打包滑块 |
 | `web/src/features/budget/ExpensePanel.tsx` | 我的代付账本 UI |
 | `web/src/features/budget/AaTicket.tsx` + `aaExport.ts` | AA 热敏小票 + 导出 |
 | `web/src/features/budget/AaShareView.tsx` | `/share/:token` 的 AA 分支 |
 | `web/src/pages/TripLayout.tsx` | 顶栏；行程分享 + AA 分享选朋友 |
 | `web/src/components/MembersEditor.tsx` | 同行人（仅朋友） |
-| `server/src/services/planner.service.ts` | 行程编排 + leg |
+| `server/src/providers/amap.ts` | POI / 路径（含公交地铁） |
+| `server/src/services/ai.chat.ts` | 行程副驾驶对话 |
+| `server/src/services/ai.service.ts` | 提取 / 排天 / adjust |
+| `server/src/services/planner.service.ts` | 行程编排 + leg + 复用 POI |
+| `server/src/services/checklist.service.ts` | 清单；`purchased` / `checked` |
 | `server/src/services/budget.service.ts` | 记账；`purgeEstimateLinkedExpenses` |
 | `server/src/services/settlement.ts` | AA 净额 |
 | `server/src/services/share.service.ts` | 只读快照 + AA snapshot / `filterAaSnap` |
 | `server/.env` · `web/.env` | 本地密钥（gitignore） |
+| `deploy/upload_and_start.py` | 上传并重启 `triptrace`（**勿提交**） |
 
 **本地启动**：仓库根目录 `npm run dev`（需已 `npm install`、`db:push`）。  
-**远程**：`origin` → `https://github.com/Yqs0724/travel-app.git`，当前开发分支 `NEW2`（`origin/NEW2`）。工作区比 `75f1b51` 多出的大屏/总览改动尚未提交。
+**远程**：`origin` → `https://github.com/Yqs0724/travel-app.git`，当前开发分支 `NEW2`（`origin/NEW2`），HEAD `c2dbe6b`。线上 `http://114.132.103.15:3003/`。

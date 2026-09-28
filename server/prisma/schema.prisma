@@ -17,6 +17,7 @@ model Trip {
   editVersion Int             @default(0) // 弱协作乐观锁
   days        TripDay[]
   expenses    Expense[]
+  budgetPlans BudgetPlanItem[]
   checklist   ChecklistItem[]
   shareLinks  ShareLink[]
   /** AI 草稿待定参考 JSON：[{id,name,startTime?,dayLabel?,...}]，不入行程 */
@@ -102,6 +103,22 @@ model ExpenseSplit {
   member    String
   ratio     Float   @default(1)
   expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+}
+
+/** 预计花费清单（预算）；植入实付后仍保留，仅标记 implanted */
+model BudgetPlanItem {
+  id          String  @id @default(cuid())
+  tripId      String
+  name        String
+  /** 账单总额（录入值；共同支出时为整单） */
+  amount      Float
+  /** 已植入实付账本（条目保留垫底，不删） */
+  implanted   Boolean @default(false)
+  /** 植入时「我」承担额；未植入为 null（合计用 amount） */
+  myShare     Float?
+  /** 植入时勾选的朋友数（>0 即共同） */
+  friendCount Int     @default(0)
+  trip        Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
 }
 
 model ChecklistItem {

@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { CATEGORY_LABELS, fetchReceiptObjectUrl, yuan } from "@/api/budget";
 import { isErr } from "@/api/client";
-import { getTripReview, type TripReview } from "@/api/review";
+import { getTripReview, reviewSummaryText, type TripReview } from "@/api/review";
 import type { TripDetail } from "@/api/trips";
+import { Button } from "@/components/Button";
 import { Sheet } from "@/components/Sheet";
 
 type Ctx = {
@@ -28,6 +29,7 @@ export function ReviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -64,7 +66,18 @@ export function ReviewPage() {
     };
   }, [data]);
 
-  if (error) {
+  async function onCopy() {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(reviewSummaryText(data));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("复制失败");
+    }
+  }
+
+  if (error && !data) {
     return <p className="px-4 pt-6 text-sm text-danger">{error}</p>;
   }
   if (!data) {
@@ -85,34 +98,74 @@ export function ReviewPage() {
         </p>
       </div>
 
-      <div className="mb-6 flex flex-wrap gap-x-5 gap-y-1 text-sm text-ink">
+      <p className="text-[20px] font-semibold tabular-nums">{yuan(data.mySpend)}</p>
+      <p className="mt-1 text-xs text-ink-muted">
+        我承担
+        {data.othersOweMe > 0 ? (
+          <>
+            {" · "}朋友应付我{" "}
+            <span className="font-medium tabular-nums text-ink">{yuan(data.othersOweMe)}</span>
+          </>
+        ) : null}
+        {data.paidOut !== data.mySpend ? (
+          <>
+            {" · "}掏出{" "}
+            <span className="tabular-nums">{yuan(data.paidOut)}</span>
+          </>
+        ) : null}
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
         <span>
-          <span className="text-ink-muted">天数 </span>
-          {data.dayCount}
+          天数 <span className="text-ink">{data.dayCount}</span>
         </span>
         <span>
-          <span className="text-ink-muted">站点数 </span>
-          {data.stopCount}
+          站点 <span className="text-ink">{data.stopCount}</span>
         </span>
         {data.legDistanceKm != null ? (
           <span>
-            <span className="text-ink-muted">路程 </span>
-            {data.legDistanceKm} km
+            路程 <span className="text-ink">{data.legDistanceKm} km</span>
           </span>
         ) : null}
         {data.legDurationMin != null ? (
           <span>
-            <span className="text-ink-muted">在途 </span>
-            {fmtDur(data.legDurationMin)}
+            在途 <span className="text-ink">{fmtDur(data.legDurationMin)}</span>
           </span>
         ) : null}
-        <span>
-          <span className="text-ink-muted">支出 </span>
-          {yuan(data.spendTotal)}
-        </span>
       </div>
 
-      <section className="mb-6">
+      <div className="mt-4">
+        <Button type="button" variant="secondary" className="w-full" onClick={() => void onCopy()}>
+          {copied ? "已复制" : "复制回顾摘要"}
+        </Button>
+      </div>
+
+      {data.budget ? (
+        <section className="mt-6">
+          <p className="mb-2 text-[11px] font-medium text-info">预算对照</p>
+          <ul className="space-y-1.5 text-sm">
+            <li className="flex justify-between gap-3">
+              <span>预算（我付）</span>
+              <span className="tabular-nums">{yuan(data.budget.planMine)}</span>
+            </li>
+            <li className="flex justify-between gap-3">
+              <span>实付（我承担）</span>
+              <span className="tabular-nums">{yuan(data.mySpend)}</span>
+            </li>
+            {data.budget.openCount > 0 ? (
+              <li className="flex justify-between gap-3 text-ink-muted">
+                <span>未入账 {data.budget.openCount} 项</span>
+                <span className="tabular-nums">{yuan(data.budget.openBill)}</span>
+              </li>
+            ) : null}
+          </ul>
+          <Link to="../budget" className="mt-2 inline-block text-xs text-accent-dark underline">
+            去记账
+          </Link>
+        </section>
+      ) : null}
+
+      <section className="mt-6">
         <p className="mb-2 text-[11px] font-medium text-info">路线</p>
         <div className="space-y-4">
           {data.days.map((d, i) => (
@@ -134,10 +187,13 @@ export function ReviewPage() {
             </div>
           ))}
         </div>
+        <Link to="../plan" className="mt-2 inline-block text-xs text-accent-dark underline">
+          去行程
+        </Link>
       </section>
 
-      <section className="mb-6">
-        <p className="mb-2 text-[11px] font-medium text-info">花费</p>
+      <section className="mt-6">
+        <p className="mb-2 text-[11px] font-medium text-info">花费（我承担）</p>
         {cats.length === 0 ? (
           <p className="text-xs text-ink-muted">还没有记账</p>
         ) : (
@@ -150,25 +206,16 @@ export function ReviewPage() {
             ))}
             <li className="flex justify-between gap-3 border-t border-line pt-1.5 font-medium">
               <span>合计</span>
-              <span className="tabular-nums">{yuan(data.spendTotal)}</span>
+              <span className="tabular-nums">{yuan(data.mySpend)}</span>
             </li>
-            {data.othersOweMe > 0 ? (
-              <li className="flex justify-between gap-3 text-xs text-ink-muted">
-                <span>朋友应付我</span>
-                <span className="tabular-nums">{yuan(data.othersOweMe)}</span>
-              </li>
-            ) : null}
           </ul>
         )}
-        <Link to="../budget" className="mt-2 inline-block text-xs text-accent-dark underline">
-          去记账
-        </Link>
       </section>
 
-      <section>
+      <section className="mt-6">
         <p className="mb-2 text-[11px] font-medium text-info">照片</p>
         {data.photos.length === 0 ? (
-          <p className="text-xs text-ink-muted">暂无账单附图（在记账里上传小票即可出现在此）</p>
+          <p className="text-xs text-ink-muted">暂无账单附图（实付里上传小票会出现在此）</p>
         ) : (
           <ul className="grid grid-cols-3 gap-2">
             {data.photos.map((p) => {

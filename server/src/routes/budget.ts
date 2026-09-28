@@ -156,4 +156,74 @@ export async function budgetRoutes(app: FastifyInstance) {
       return sendErr(reply, e);
     }
   });
+
+  app.get("/api/v1/trips/:id/budget-plans", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      await assertEditorTrip(req, id);
+      return ok(await budget.listBudgetPlans(id));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.post("/api/v1/trips/:id/budget-plans", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = z
+      .object({ name: z.string().min(1).max(80), amount: z.number().positive() })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      await assertEditorTrip(req, id);
+      return reply
+        .status(201)
+        .send(ok(await budget.addBudgetPlan(id, parsed.data.name, parsed.data.amount)));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.patch("/api/v1/budget-plans/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = z
+      .object({
+        name: z.string().min(1).max(80).optional(),
+        amount: z.number().positive().optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      const tripId = await budget.tripIdForBudgetPlan(id);
+      await assertEditorTrip(req, tripId);
+      return ok(await budget.updateBudgetPlan(id, parsed.data));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.delete("/api/v1/budget-plans/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const tripId = await budget.tripIdForBudgetPlan(id);
+      await assertEditorTrip(req, tripId);
+      return ok(await budget.removeBudgetPlan(id));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
+
+  app.post("/api/v1/budget-plans/:id/implant", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = z
+      .object({ friends: z.array(z.string().min(1).max(40)).optional() })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) return reply.status(400).send(fail(40001, "参数无效"));
+    try {
+      const tripId = await budget.tripIdForBudgetPlan(id);
+      await assertEditorTrip(req, tripId);
+      return ok(await budget.implantBudgetPlan(id, parsed.data.friends ?? []));
+    } catch (e) {
+      return sendErr(reply, e);
+    }
+  });
 }
